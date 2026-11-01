@@ -24,6 +24,7 @@ pub mod dialogs;
 pub mod docking;
 mod drop_overlay;
 pub mod export_task;
+pub mod external_editors;
 mod focus_scan;
 mod frame_rate;
 pub mod headless;

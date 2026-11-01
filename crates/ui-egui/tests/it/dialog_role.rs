@@ -7,7 +7,14 @@ use lightcraft_ui_egui::{LightcraftApp, Services};
 
 fn harness() -> Harness<'static, LightcraftApp> {
     let app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), Services { png: None, ..Default::default() });
-    let mut h = Harness::builder().with_size(vec2(1500.0, 950.0)).build_ui_state(
+    let mut builder = Harness::builder().with_size(vec2(1500.0, 950.0));
+    // Settings lists every language in its native script. As in the accessibility-name audit,
+    // a build without the optional font bundle still checks dialog roles, titles and modality;
+    // glyph coverage belongs to the font tests, not this audit.
+    if lightcraft_engine::CRAFT_FONTS.is_empty() {
+        builder = builder.allow_missing_glyphs();
+    }
+    let mut h = builder.build_ui_state(
         |ui, app: &mut LightcraftApp| {
             app.logic(&ui.ctx().clone());
             app.ui(ui);

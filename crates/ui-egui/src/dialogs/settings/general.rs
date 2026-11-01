@@ -109,6 +109,55 @@ pub(super) fn general_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens
             "To hand this editor the original file itself instead (the raw, without a copy: DxO PhotoLab, for example), right-click a photo → Edit In → Open Original in Other Editor (RAW, no copy).",
         ),
     );
+    named_editors(app, ui, t);
+}
+
+/// Each editor has its own copy settings; changing one never changes another editor or the
+/// legacy Other Editor. Commands make the same configuration available to CLI/control clients.
+fn named_editors(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
+    heading(ui, t, "Named external editors");
+    hint(ui, t, "Add Affinity Photo and each Nik application separately. On macOS, enter its exact application name or full .app path.");
+    hint(ui, t, "Save the edited TIFF to the same path, then return to LightCraft to refresh it. Save As to another path is not tracked.");
+    let editors = app.ui.settings.external_editors.clone();
+    for original in editors {
+        let mut editor = original.clone();
+        let key = format!("externalEditor{}", editor.id);
+        ui.separator();
+        row(ui, t, "Editor name", |ui| {
+            field(ui, crate::text_field::TextField::singleline(&format!("field:{key}Name"), &mut editor.name).width(220.0));
+        });
+        row(ui, t, "Application", |ui| {
+            field(
+                ui,
+                crate::text_field::TextField::singleline(&format!("field:{key}Application"), &mut editor.application)
+                    .hint("Affinity Photo 2 / Silver Efex / Color Efex")
+                    .width(220.0),
+            );
+        });
+        edit_file_rows(ui, t, &key, &mut editor.file);
+        if editor != original {
+            let p = json!({"action": "update", "id": editor.id, "name": editor.name, "application": editor.application, "file": editor.file});
+            if let Err(e) = app.run("app.externalEditors", p) {
+                app.toast(ui.ctx(), e);
+            }
+        }
+        row(ui, t, "", |ui| {
+            let r = ui.button(crate::i18n::tr("Remove editor"));
+            register(ui, format!("button:{key}Remove"), r.rect);
+            if r.clicked() {
+                let _ = app.run("app.externalEditors", json!({"action": "remove", "id": editor.id}));
+            }
+        });
+    }
+    row(ui, t, "", |ui| {
+        let r = ui.button(crate::i18n::tr("Add editor"));
+        register(ui, "button:addExternalEditor", r.rect);
+        if r.clicked()
+            && let Err(e) = app.run("app.externalEditors", json!({"action": "add"}))
+        {
+            app.toast(ui.ctx(), e);
+        }
+    });
 }
 
 /// The file Edit In hands an editor: format, colour space and bit depth (`button:{id}Format-…`).

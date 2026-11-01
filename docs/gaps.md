@@ -176,3 +176,7 @@ Beta-blocking gaps (B) total **~230–430 h**; with the stability and platform w
 | 2026-10-14 | minor | Gap 10: 515 of 1,446 models verified (36%), ~84% of photographers on a verified body (integration batch 36) |
 | 2026-10-24 | patch | LR-META-XMP: sidecar keywords are written as names in `dc:subject` and paths in `lr:hierarchicalSubject`, so other DAMs can search them; ranked gaps and estimates unchanged |
 | 2026-10-20 | minor | Opt-in Windows DirectComposition preference added; VRR hardware verification pending; parity counts unchanged |
+
+## Fork: Affinity Photo and Nik external editing
+
+Named editors and per-editor copy settings are implemented on `feature/affinity-nik`. The existing TIFF/PSD copy, stack and focus-return reload path is reused. This does not close the plug-in SDK gap. Still pending: end-to-end verification on the user’s macOS/Affinity Photo 2/Nik versions, Nik applications that save to a new filename, and application discovery. See [external-editors.md](external-editors.md).

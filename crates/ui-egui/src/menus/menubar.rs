@@ -49,6 +49,7 @@ pub fn display_item_label<'a>(id: &str, params: &Value, label: &'a str) -> &'a s
         || (id == "app.export" && params.get("preset").is_some())
         || (id == "app.openLibrary" && params.get("path").is_some())
         || (id == "app.recentLibraries" && params.get("remove").is_some())
+        || (id == "photo.editInExternal" && params.get("editorId").is_some())
     {
         label
     } else {
@@ -273,6 +274,7 @@ const LAYOUT: &[(&str, &[&str])] = &[
             "develop.reset",
             "develop.updateProcess",
             "dialog.createPreset",
+            "@Edit In",
             "---",
             "photo.saveMetadataToFile",
             "photo.readMetadataFromFile",
@@ -469,6 +471,22 @@ pub(crate) fn expanded(app: &LightcraftApp, name: &str) -> Option<Vec<MenuNode>>
     let active = app.session.active().and_then(|id| app.session.catalog.photo(id).cloned());
     let has = active.is_some();
     Some(match name {
+        "Edit In" => app
+            .ui
+            .settings
+            .external_editors
+            .iter()
+            .map(|editor| {
+                item(
+                    "photo.editInExternal",
+                    json!({"editorId": editor.id}),
+                    editor.name.clone(),
+                    None,
+                    crate::menus::ui_enabled(app, "photo.editInExternal") && !editor.application.trim().is_empty(),
+                    None,
+                )
+            })
+            .collect(),
         "Previews" => {
             let running = app.session.preview_build.as_ref().is_some_and(|b| !b.finished.load(std::sync::atomic::Ordering::Relaxed));
             let scope = if app.session.selection.ids.len() > 1 { "Selected" } else { "Visible" };

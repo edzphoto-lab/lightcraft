@@ -1303,6 +1303,15 @@ fn context_menu_open_and_edit(app: &mut LightcraftApp, ui: &mut egui::Ui, id: Ph
             if ui.button(crate::i18n::tr("Edit in Other Editor")).clicked() {
                 let _ = app.run("photo.editInExternal", json!({}));
             }
+            let editors = app.ui.settings.external_editors.clone();
+            if !editors.is_empty() {
+                ui.separator();
+            }
+            for editor in editors {
+                if ui.add_enabled(!editor.application.trim().is_empty(), egui::Button::new(&editor.name)).clicked() {
+                    let _ = app.run("photo.editInExternal", json!({"editorId": editor.id}));
+                }
+            }
             // the raw itself, unrendered: for a raw developer set as the other editor
             if ui
                 .add_enabled(
