@@ -24,7 +24,7 @@ codesign --force --sign - --timestamp=none --options runtime --entitlements "$RO
 codesign --force --sign - --timestamp=none --options runtime --entitlements "$ROOT/packaging/macos/entitlements.plist" "$APP"
 codesign --verify --strict --deep --verbose=2 "$APP"
 plutil -lint "$APP/Contents/Info.plist"
-lipo -verify_arch x86_64 "$APP/Contents/MacOS/LightCraftCore"
+lipo "$APP/Contents/MacOS/LightCraftCore" -verify_arch x86_64
 otool -L "$APP/Contents/MacOS/LightCraftCore"
 ARCHIVE="$DIST/LightCraft-EdZ-Lab-macOS-Intel.zip"
 ditto -c -k --sequesterRsrc --keepParent "$WORK" "$ARCHIVE"
