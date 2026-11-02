@@ -179,4 +179,4 @@ Beta-blocking gaps (B) total **~230–430 h**; with the stability and platform w
 
 ## Fork: Affinity Photo and Nik external editing
 
-Named editors and per-editor copy settings are implemented on `feature/affinity-nik`. The existing TIFF/PSD copy, stack and focus-return reload path is reused. This does not close the plug-in SDK gap. Still pending: end-to-end verification on the user’s macOS/Affinity Photo 2/Nik versions, Nik applications that save to a new filename, and application discovery. See [external-editors.md](external-editors.md).
+Named editors and per-editor copy settings are implemented on `feature/affinity-nik`. The existing TIFF/PSD copy, stack and focus-return reload path is reused. This does not close the plug-in SDK gap. Still pending: end-to-end verification on the user’s macOS/Affinity Photo 2/Nik versions, Nik applications that save to a new filename, and validating the new macOS application discovery on the user’s machine. A dedicated External editors tab now provides background discovery, manual configuration and individual removal. See [external-editors.md](external-editors.md).

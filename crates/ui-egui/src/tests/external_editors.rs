@@ -111,13 +111,8 @@ fn external_editor_settings_can_add_an_editor_and_fit_the_window() {
     let (mut app, _) = app();
     app.run("app.externalEditors", json!({"action": "add", "name": "Affinity Photo 2", "application": "Affinity Photo 2"})).unwrap();
     let mut h = Headless::new(app, [1200.0, 900.0], 1.0);
-    h.app.run("app.settings", json!({"tab": "general"})).unwrap();
+    h.app.run("app.settings", json!({"tab": "externalEditors"})).unwrap();
     h.settle(timeout);
-    h.request("ui.move", json!({"x": 700, "y": 500}), timeout);
-    for _ in 0..3 {
-        h.request("ui.scroll", json!({"dy": -1200}), timeout);
-        h.settle(timeout);
-    }
     let r = h.request("ui.clickWidget", json!({"id": "button:addExternalEditor"}), timeout);
     assert_eq!(r["ok"], true, "{r}");
     h.settle(timeout);
@@ -126,6 +121,9 @@ fn external_editor_settings_can_add_an_editor_and_fit_the_window() {
         assert!(rect.left() >= 0.0 && rect.right() <= h.size.x, "{rect:?}");
     }
     if let Some(path) = std::env::var_os("LIGHTCRAFT_EXTERNAL_EDITORS_SNAPSHOT") {
+        h.app.ui.language = crate::i18n::Locale::Fr;
+        h.request("ui.scroll", json!({"dy": 2000}), timeout);
+        h.settle(timeout);
         let image = h.snapshot(timeout);
         let pixels = lightcraft_raster::Rgba8 {
             width: image.size[0],

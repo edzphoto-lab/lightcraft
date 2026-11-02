@@ -25,7 +25,8 @@ n'est pas garantie. Importer seulement des **copies de photos** pour commencer.
 Les mises à jour officielles sont bloquées par un fichier de version propre
 à ce paquet afin de conserver cette isolation.
 
-Dans les paramètres généraux, rubrique édition externe, ajouter Affinity Photo 2
+Dans les préférences, onglet Éditeurs externes, utiliser la détection automatique
+ou ajouter manuellement Affinity Photo 2
 puis Silver Efex Pro 2 et les autres applications Nik souhaitées. Choisir leurs
 fichiers `.app`, TIFF, 16 bits, Adobe RGB pour le premier essai.
 

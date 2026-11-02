@@ -5,7 +5,9 @@ use serde_json::{Value, json};
 
 use crate::state::{AppSettings, EditFile, ExternalEditor};
 
-const MAX_EDITORS: usize = 32;
+pub mod discovery;
+
+const MAX_EDITORS: usize = 256;
 
 pub fn find(settings: &AppSettings, id: u64) -> Result<&ExternalEditor, String> {
     let mut matches = settings.external_editors.iter().filter(|e| e.id == id);

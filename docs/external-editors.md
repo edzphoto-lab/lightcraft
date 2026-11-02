@@ -6,7 +6,7 @@ stacking and focus-return reload pipeline. It is not a Nik plug-in host.
 
 ## Configure
 
-1. Open **Settings → General → External Editing**.
+1. Open **Settings → External editors**.
 2. Under **Named external editors**, click **Add editor**.
 3. Give the entry a name, for example **Affinity Photo 2**, **Silver Efex** or
    **Color Efex**.
@@ -19,8 +19,34 @@ stacking and focus-return reload pipeline. It is not a Nik plug-in host.
    file. The legacy Other Editor and PhotoCraft settings are preserved.
 
 An entry with no application is disabled in the menu. Removing an entry removes
-only its preference, never photographs or applications. Up to 32 entries can be
+only its preference, never photographs or applications. Up to 256 entries can be
 configured. Names are labels, not commands or shell expressions.
+
+## Automatic discovery (macOS)
+
+Click **Automatically detect installed editors** in the dedicated preferences tab.
+A background worker searches Spotlight's indexed application bundles, `/Applications`,
+`/System/Applications`, `~/Applications` and system/user `Library/Application Support`.
+It includes nested Nik suite folders, reads XML/binary `Info.plist` files with macOS
+`plutil`, and never launches the discovered applications.
+
+Recognition combines known photo editor names (including Google Nik 1.2.11) with
+bundle declarations for photography apps that edit photo documents. This is a
+heuristic, not a guarantee of finding every photo application or of TIFF round-trip
+compatibility. Non-indexed custom locations can require manual addition. Symbolic
+links and bundle internals are not traversed. Folder depth and entry counts are
+bounded; the result reports unreadable locations and limits reached.
+
+Detection adds missing entries with 16-bit TIFF / Adobe RGB defaults. Existing paths,
+stable ids and per-editor preferences are preserved; repeating detection does not
+duplicate the same canonical application path. Different installed versions may have
+separate entries. A 256-editor safety limit applies; an invalid entry or a
+full list leaves preferences unchanged and reports an error.
+
+**Remove editor** removes only the LightCraft configuration entry, never the
+application or photos. A subsequent detection can rediscover a removed application.
+Manual addition and the legacy PhotoCraft/Other Editor controls remain in this tab.
+Detection is currently disabled on Windows, Linux and the web.
 
 ## Edit and return
 
@@ -52,7 +78,7 @@ tests of Affinity or Nik itself. End-to-end checks on the user's macOS,
 Affinity Photo 2 and installed Nik generation are still required. No signed or
 notarized macOS installer is included in this change.
 
-Automatic application discovery, tracking a new output filename and polling
+Tracking a new output filename and polling
 for files saved after LightCraft has already regained focus are not added in
 this first step. The existing focus-return handler remains unchanged.
 
