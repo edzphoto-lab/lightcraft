@@ -22,6 +22,7 @@ use crate::widgets::register;
 
 mod appearance;
 mod display;
+mod external;
 mod general;
 mod import;
 mod libraries;
@@ -48,6 +49,7 @@ pub mod slide_titles;
 /// (id, label) of the tabs, in order.
 pub const TABS: &[(&str, &str)] = &[
     ("general", "General"),
+    ("externalEditors", "External editors"),
     ("import", "Import"),
     ("performance", "Performance"),
     ("display", "Display"),
@@ -66,6 +68,7 @@ const LABEL_W: f32 = 150.0;
 pub fn body(app: &mut LightcraftApp, ui: &mut egui::Ui, tab: &str) {
     let t = Tokens::get(ui.ctx());
     match tab {
+        "externalEditors" => external::external_tab(app, ui, &t),
         "import" => import_tab(app, ui, &t),
         "performance" => performance_tab(app, ui, &t),
         "display" => display_tab(app, ui, &t),
