@@ -5,7 +5,7 @@
 #   $DIST/lightcraft-cli-<version>-macos-<arch>.zip      the headless CLI
 #
 # Usage: packaging/macos/package.sh [--arch universal|aarch64|x86_64] [--skip-build]
-# EdZ Lab: LIGHTCRAFT_EDZ_LAB=1 requires resvg and a version such as 0.17.0-edz.3.1.
+# EdZ Lab: LIGHTCRAFT_EDZ_LAB=1 requires resvg and a version such as 0.17.1.
 # Fonts: use CRAFT_FONTS_DIR or ../craft-fonts; download the pinned checkout if absent.
 #
 # Signing (env):
@@ -45,8 +45,8 @@ APP_NAME="LightCraft"
 APP_ID="ai.storyteller.lightcraft"
 DMG_PREFIX="lightcraft"
 if [[ "${LIGHTCRAFT_EDZ_LAB:-0}" == 1 ]]; then
-  [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-edz\.[0-9]+\.[0-9]+$ ]] || {
-    echo "error: set a version such as 0.17.0-edz.3.1 for the EdZ Lab package" >&2
+  [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo "error: set a version such as 0.17.1 for the EdZ Lab package" >&2
     exit 2
   }
   APP_NAME="LightCraft EdZ Lab_$VERSION"
@@ -148,6 +148,7 @@ if [[ "${LIGHTCRAFT_EDZ_LAB:-0}" == 1 ]]; then
     resvg -w "$((size * 2))" -h "$((size * 2))" "$WORK/edz.svg" "$iconset/icon_${size}x${size}@2x.png"
   done
   iconutil -c icns -o "$APP/Contents/Resources/LightCraft.icns" "$iconset"
+  cp "$iconset/icon_512x512.png" "$APP/Contents/Resources/LightCraftEdZ.png"
 else
   cp "$ROOT/assets/app-icon/lightcraft.icns" "$APP/Contents/Resources/LightCraft.icns"
 fi

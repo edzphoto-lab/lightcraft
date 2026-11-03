@@ -34,10 +34,8 @@ jobs:
       - name: Build versioned EdZ Lab DMG
         env:
           LIGHTCRAFT_EDZ_LAB: '1'
-        run: |
-          source packaging/env.sh
-          export LIGHTCRAFT_VERSION="$VERSION-edz.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-          bash packaging/macos/package.sh --arch x86_64
+          LIGHTCRAFT_VERSION: '0.17.1'
+        run: bash packaging/macos/package.sh --arch x86_64
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: LightCraft-EdZ-Lab-macOS-Intel
