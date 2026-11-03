@@ -146,6 +146,11 @@ pub struct AppSettings {
     pub external_editor: String,
     /// The file Edit in Other Editor hands over.
     pub external_file: EditFile,
+    /// Named editors offered in Photo ▸ Edit In, in addition to the legacy other editor.
+    #[serde(deserialize_with = "lenient")]
+    pub external_editors: Vec<ExternalEditor>,
+    /// Never reuse an editor id: an old menu item must not launch a newly added editor.
+    pub next_external_editor_id: u64,
     /// Edit in PhotoCraft: where PhotoCraft is ("" = found where its installer put it; a portable
     /// copy needs its path).
     pub photocraft_path: String,
@@ -226,6 +231,8 @@ impl Default for AppSettings {
             preview_limit: 0,
             external_editor: String::new(),
             external_file: EditFile::default(),
+            external_editors: Vec::new(),
+            next_external_editor_id: 1,
             photocraft_path: String::new(),
             photocraft_file: EditFile { format: EditFormat::Psd, ..EditFile::default() },
             memory_mb: 0,
@@ -252,6 +259,17 @@ impl Default for AppSettings {
 /// The editor name that means PhotoCraft (Photo ▸ Edit In ▸ Edit in PhotoCraft): the host finds
 /// where it is installed.
 pub const PHOTOCRAFT: &str = "PhotoCraft";
+
+/// A user's external editor. Application is a macOS app name/bundle path, or a program path.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalEditor {
+    pub id: u64,
+    pub name: String,
+    pub application: String,
+    #[serde(default)]
+    pub file: EditFile,
+}
 
 /// The file format Edit In renders the copy as.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

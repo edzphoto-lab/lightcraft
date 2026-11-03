@@ -29,6 +29,7 @@ mod drop_import;
 mod edit_layout;
 mod empty_library;
 mod error_kinds;
+mod external_editors;
 mod filmstrip;
 mod filmstrip_drag;
 mod focus_point;

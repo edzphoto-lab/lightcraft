@@ -1,0 +1,38 @@
+name: macOS Intel — test DMG
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'crates/ui-egui/**'
+      - 'packaging/macos/**'
+      - '.github/workflows/macos-test-dmg.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-dmg:
+    runs-on: macos-15-intel
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+      - name: Build unsigned Intel test DMG
+        env:
+          MACOS_SIGN_IDENTITY: '-'
+        run: bash packaging/macos/package.sh --arch x86_64
+      - name: Publish test DMG and CLI as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lightcraft-edz-lab-macos-intel-test
+          path: |
+            dist/release/*macos-x86_64.dmg
+            dist/release/*macos-x86_64.zip
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,29 @@
+name: macOS Intel — external editors validation
+
+on:
+  pull_request:
+    paths:
+      - 'crates/ui-egui/**'
+      - '.github/workflows/macos-external-editors.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-intel:
+    name: macOS Intel compile and editor tests
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+      - name: Compile LightCraft UI
+        run: cargo check --locked -p lightcraft-ui-egui
+      - name: External editor regression tests
+        run: cargo test --locked -p lightcraft-ui-egui external_editors -- --nocapture
+      - name: Discovery tests
+        run: cargo test --locked -p lightcraft-ui-egui discovery -- --nocapture

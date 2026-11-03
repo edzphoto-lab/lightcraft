@@ -3573,5 +3573,22 @@
   "Top bar": "Barre supérieure",
   "Tool strip": "Barre d’outils",
   "Bottom bar": "Barre inférieure",
-  "Prevent G-SYNC/FreeSync flicker (applies at next launch)": "Empêcher le scintillement G-SYNC/FreeSync (au prochain démarrage)"
+  "Prevent G-SYNC/FreeSync flicker (applies at next launch)": "Empêcher le scintillement G-SYNC/FreeSync (au prochain démarrage)",
+  "Named external editors": "Éditeurs externes personnalisés",
+  "Add Affinity Photo and each Nik application separately. On macOS, enter its exact application name or full .app path.": "Ajoutez Affinity Photo et chaque application Nik séparément. Sur macOS, saisissez son nom exact ou le chemin complet du fichier .app.",
+  "Save the edited TIFF to the same path, then return to LightCraft to refresh it. Save As to another path is not tracked.": "Enregistrez le TIFF modifié au même emplacement, puis revenez dans LightCraft pour l’actualiser. Un enregistrement sous un autre chemin n’est pas suivi.",
+  "Editor name": "Nom de l’éditeur",
+  "Remove editor": "Supprimer l’éditeur",
+  "Add editor": "Ajouter un éditeur",
+  "Configure External Editors": "Configurer les éditeurs externes",
+  "External editors": "Éditeurs externes",
+  "Automatically detect installed editors": "Détecter automatiquement les éditeurs installés",
+  "Detect photo applications in Applications and Application Support, including subfolders. Detection does not open applications or change existing editor settings.": "Rechercher les applications photo dans Applications et Application Support, y compris les sous-dossiers. La détection ne lance aucune application et conserve les réglages existants.",
+  "Searching for photo applications…": "Recherche des applications photo…",
+  "Automatic detection is currently available on macOS only.": "La détection automatique est actuellement disponible uniquement sur macOS.",
+  "Remove editor only removes the LightCraft entry. A later detection can add it again. Applications outside the searched folders can be added manually.": "Supprimer un éditeur retire uniquement son entrée dans LightCraft. Une nouvelle détection peut le réajouter. Les applications situées ailleurs peuvent être ajoutées manuellement.",
+  "Detected": "Détectés",
+  "Added": "Ajoutés",
+  "Unreadable locations": "Emplacements illisibles",
+  " (search limit reached)": " (limite de recherche atteinte)"
 }

@@ -107,7 +107,8 @@ pub(super) fn show_in_folders(app: &mut LightcraftApp, id: Option<lightcraft_cat
 
 /// Photo ▸ Edit In: render a copy of each selected photo with its edits (stacked on its original)
 /// as Settings ▸ External Editing asks for that editor, then open them there. `p` may override the
-/// file (`format`, `colorSpace`, `bitDepth`) and the editor (`app`). PhotoCraft is checked first,
+/// file (`format`, `colorSpace`, `bitDepth`) and the editor (`app`), or select a named editor
+/// with `editorId`. PhotoCraft is checked first,
 /// so a missing editor leaves no copy behind. Once the copies exist, an editor that won't open them
 /// is reported in the result's `failed` (and a toast), not as an error.
 pub(super) fn edit_in(app: &mut LightcraftApp, ctx: &egui::Context, p: &Value, photocraft: bool) -> Result<Value, String> {
@@ -116,10 +117,20 @@ pub(super) fn edit_in(app: &mut LightcraftApp, ctx: &egui::Context, p: &Value, p
 }
 
 fn edit_in_inner(app: &mut LightcraftApp, ctx: &egui::Context, p: &Value, photocraft: bool) -> Result<Value, String> {
+    if app.services.open_with.is_none() {
+        return Err("opening another application isn't available here".into());
+    }
     let settings = &app.ui.settings;
     let (file, configured) = if photocraft {
         let path = settings.photocraft_path.trim();
         (settings.photocraft_file, if path.is_empty() { crate::state::PHOTOCRAFT.to_string() } else { path.to_string() })
+    } else if let Some(id) = p.get("editorId") {
+        let id = id.as_u64().ok_or("editorId must be an unsigned integer")?;
+        let editor = crate::external_editors::find(settings, id)?;
+        if editor.application.trim().is_empty() {
+            return Err("set this editor's application in Settings ▸ General ▸ External Editing first".into());
+        }
+        (editor.file, editor.application.trim().to_string())
     } else {
         (settings.external_file, settings.external_editor.clone())
     };
@@ -129,7 +140,7 @@ fn edit_in_inner(app: &mut LightcraftApp, ctx: &egui::Context, p: &Value, photoc
     }
     let mut params = file.params();
     if let (Some(o), Some(given)) = (params.as_object_mut(), p.as_object()) {
-        for (k, v) in given.iter().filter(|(k, _)| k.as_str() != "app") {
+        for (k, v) in given.iter().filter(|(k, _)| !matches!(k.as_str(), "app" | "editorId")) {
             o.insert(k.clone(), v.clone());
         }
     }
