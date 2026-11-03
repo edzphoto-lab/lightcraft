@@ -5,6 +5,7 @@
 #   $DIST/lightcraft-cli-<version>-macos-<arch>.zip      the headless CLI
 #
 # Usage: packaging/macos/package.sh [--arch universal|aarch64|x86_64] [--skip-build]
+# EdZ Lab: LIGHTCRAFT_EDZ_LAB=1 requires resvg and a version such as 0.17.0-edz.3.1.
 # Fonts: use CRAFT_FONTS_DIR or ../craft-fonts; download the pinned checkout if absent.
 #
 # Signing (env):
@@ -40,8 +41,23 @@ export MACOSX_DEPLOYMENT_TARGET=11.0
 IDENTITY="${MACOS_SIGN_IDENTITY:--}"
 SHORT_VERSION="${VERSION%%-*}"
 WORK="$CARGO_TARGET_DIR/macos-package"
-APP="$WORK/LightCraft.app"
-DMG="$DIST/lightcraft-$VERSION-macos-$ARCH.dmg"
+APP_NAME="LightCraft"
+APP_ID="ai.storyteller.lightcraft"
+DMG_PREFIX="lightcraft"
+if [[ "${LIGHTCRAFT_EDZ_LAB:-0}" == 1 ]]; then
+  [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-edz\.[0-9]+\.[0-9]+$ ]] || {
+    echo "error: set a version such as 0.17.0-edz.3.1 for the EdZ Lab package" >&2
+    exit 2
+  }
+  APP_NAME="LightCraft EdZ Lab_$VERSION"
+  APP_ID="org.edzphoto.lightcraft.lab"
+  DMG_PREFIX="lightcraft-edz-lab"
+  WORK="$(mktemp -d "${TMPDIR:-/tmp}/lightcraft-edz-macos.XXXXXXXX")"
+  trap 'rm -rf "$WORK"' EXIT
+fi
+APP_FILE="$APP_NAME.app"
+APP="$WORK/$APP_FILE"
+DMG="$DIST/$DMG_PREFIX-$VERSION-macos-$ARCH.dmg"
 CLI_ZIP="$DIST/lightcraft-cli-$VERSION-macos-$ARCH.zip"
 
 NOTARIZE=0
@@ -65,7 +81,7 @@ if [[ "$SKIP_BUILD" = 0 ]]; then
   (cd "$ROOT" && cargo build --release --locked -p lightcraft -p lightcraft-cli --features lightcraft/heif,lightcraft-cli/heif "${args[@]}")
 fi
 
-rm -rf "$WORK"
+if [[ "${LIGHTCRAFT_EDZ_LAB:-0}" != 1 ]]; then rm -rf "$WORK"; fi
 mkdir -p "$WORK/bin"
 for bin in lightcraft lightcraft-cli; do
   inputs=()
@@ -121,10 +137,29 @@ echo "==> assembling $APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Executable and icon carry the display name (CFBundleExecutable / CFBundleIconFile).
 cp "$WORK/bin/lightcraft" "$APP/Contents/MacOS/LightCraft"
-cp "$ROOT/assets/app-icon/lightcraft.icns" "$APP/Contents/Resources/LightCraft.icns"
+if [[ "${LIGHTCRAFT_EDZ_LAB:-0}" == 1 ]]; then
+  # Derive the fork icon from the licensed lynx SVG, retaining Apple's transparent margin.
+  sed 's/fill="#f2a516"/fill="#c42032"/; s/viewBox="0 0 512 512"/viewBox="-62 -62 636 636"/' \
+    "$ROOT/assets/app-icon/lightcraft.svg" >"$WORK/edz.svg"
+  iconset="$WORK/edz.iconset"
+  mkdir -p "$iconset"
+  for size in 16 32 128 256 512; do
+    resvg -w "$size" -h "$size" "$WORK/edz.svg" "$iconset/icon_${size}x${size}.png"
+    resvg -w "$((size * 2))" -h "$((size * 2))" "$WORK/edz.svg" "$iconset/icon_${size}x${size}@2x.png"
+  done
+  iconutil -c icns -o "$APP/Contents/Resources/LightCraft.icns" "$iconset"
+else
+  cp "$ROOT/assets/app-icon/lightcraft.icns" "$APP/Contents/Resources/LightCraft.icns"
+fi
 sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHORT_VERSION@/$SHORT_VERSION/g" \
   -e "s/@BUILD_SHA@/${LIGHTCRAFT_BUILD_SHA:-unknown}/g" \
   "$HERE/Info.plist.in" >"$APP/Contents/Info.plist"
+if [[ "${LIGHTCRAFT_EDZ_LAB:-0}" == 1 ]]; then
+  plist="$APP/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $APP_NAME" "$plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleName $APP_NAME" "$plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $APP_ID" "$plist"
+fi
 plutil -lint "$APP/Contents/Info.plist"
 printf 'APPL????' >"$APP/Contents/PkgInfo"
 # Licences (and the craft-fonts font licences when built with CRAFT_FONTS_DIR) inside the bundle.
@@ -153,12 +188,14 @@ fi
 echo "==> building $DMG"
 STAGE="$WORK/dmg"
 mkdir -p "$STAGE"
-ditto "$APP" "$STAGE/LightCraft.app"
+ditto "$APP" "$STAGE/$APP_FILE"
 ln -s /Applications "$STAGE/Applications"
 # Finder window layout: background, icon size and positions (packaging/macos/dmg/README.md).
-mkdir -p "$STAGE/.background"
-cp "$HERE/dmg/background.tiff" "$STAGE/.background/background.tiff"
-cp "$HERE/dmg/dmg-layout.DS_Store" "$STAGE/.DS_Store"
+if [[ "${LIGHTCRAFT_EDZ_LAB:-0}" != 1 ]]; then
+  mkdir -p "$STAGE/.background"
+  cp "$HERE/dmg/background.tiff" "$STAGE/.background/background.tiff"
+  cp "$HERE/dmg/dmg-layout.DS_Store" "$STAGE/.DS_Store"
+fi
 rm -f "$DMG"
 # hdiutil makehybrid -hfs injects FinderInfo metadata into the signed app.
 # create -srcfolder preserves the signed app and the existing .DS_Store layout.
@@ -177,7 +214,7 @@ hdiutil_retry() {
     sleep $((attempt * 10))
   done
 }
-hdiutil_retry create -srcfolder "$STAGE" -volname "LightCraft" -fs HFS+ -format UDZO \
+hdiutil_retry create -srcfolder "$STAGE" -volname "$APP_NAME" -fs HFS+ -format UDZO \
   -imagekey zlib-level=9 -ov "$DMG"
 sign "$DMG"
 codesign --verify --strict --verbose=2 "$DMG"
@@ -192,21 +229,24 @@ verify_dmg_app() {
     hdiutil detach "$mount" >/dev/null 2>&1 || true
     return 1
   fi
-  echo "==> strict codesign of LightCraft.app in finished DMG"
-  codesign --verify --deep --strict --verbose=2 "$mount/LightCraft.app" || rc=1
+  echo "==> strict codesign of $APP_FILE in finished DMG"
+  codesign --verify --deep --strict --verbose=2 "$mount/$APP_FILE" || rc=1
   if [[ "$rc" = 0 ]]; then
-    ditto "$mount/LightCraft.app" "$copy/LightCraft.app" || rc=1
+    ditto "$mount/$APP_FILE" "$copy/$APP_FILE" || rc=1
   fi
   if [[ "$rc" = 0 ]]; then
-    echo "==> strict codesign of LightCraft.app after ditto install-copy"
-    codesign --verify --deep --strict --verbose=2 "$copy/LightCraft.app" || rc=1
+    echo "==> strict codesign of $APP_FILE after ditto install-copy"
+    codesign --verify --deep --strict --verbose=2 "$copy/$APP_FILE" || rc=1
+  fi
+  if [[ "$rc" = 0 && "${LIGHTCRAFT_EDZ_LAB:-0}" == 1 && "$ARCH" == x86_64 ]]; then
+    lipo "$copy/$APP_FILE/Contents/MacOS/LightCraft" -verify_arch x86_64 || rc=1
   fi
   if [[ "$rc" = 0 ]] && [[ "$NOTARIZE" = 1 ]]; then
-    spctl --assess --type execute -vvv "$copy/LightCraft.app" || rc=1
+    spctl --assess --type execute -vvv "$copy/$APP_FILE" || rc=1
   fi
   if [[ "$rc" != 0 ]]; then
     echo "error: published-image app verification failed; reject $DMG" >&2
-    xattr -lr "$mount/LightCraft.app" >&2 || true
+    xattr -lr "$mount/$APP_FILE" >&2 || true
   fi
   if ! hdiutil_retry detach "$mount" >/dev/null; then
     echo "error: could not detach verification mount" >&2

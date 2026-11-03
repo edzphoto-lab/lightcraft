@@ -170,8 +170,21 @@ fn edit_external(s: &mut Session, p: &Value) -> Result<Value> {
 /// Most photos one Edit In renders (each becomes a full-size file on disk and a library photo).
 const MAX_EDIT_COPIES: usize = 50;
 
+/// Add a rendered or duplicated file to the source photo's regular albums.
+fn copy_album_memberships(s: &Session, source: lightcraft_catalog::PhotoId, copy: lightcraft_catalog::PhotoId) -> Vec<Op> {
+    s.catalog
+        .albums()
+        .filter(|album| !album.is_smart() && !album.folder && album.photos.contains(&source) && !album.photos.contains(&copy))
+        .map(|album| {
+            let mut photos = album.photos.clone();
+            photos.push(copy);
+            Op::SetAlbumPhotos { id: album.id, photos }
+        })
+        .collect()
+}
+
 /// One photo's edit copy for [`edit_external`]: rendered with `opts` next to its original (a demo
-/// photo into `dir`), added to the library and stacked on top of the original, expanded.
+/// photo into `dir`), added to the library and its regular albums, and stacked on top of the original, expanded.
 fn edit_copy(s: &mut Session, p: &Value, id: lightcraft_catalog::PhotoId, opts: &crate::export::ExportOptions) -> Result<Value> {
     const C: &str = "photo.editExternal";
     let ph = s.catalog.photo(id).cloned().ok_or_else(|| bad(C, format!("no photo {}", id.0)))?;
@@ -195,8 +208,13 @@ fn edit_copy(s: &mut Session, p: &Value, id: lightcraft_catalog::PhotoId, opts: 
     let out = written.into_iter().find(|w| w.ends_with(&ext)).ok_or_else(|| bad(C, "nothing was written"))?;
     let r = s.execute("library.import", &json!({"paths": [out]}))?;
     let new = r["imported"].get(0).and_then(Value::as_u64).ok_or_else(|| bad(C, "the edit copy could not be added"))?;
-    // stack: the edit on top of the original, expanded so both show
-    let _ = s.execute("stack.group", &json!({"ids": [new, id.0], "top": new, "collapsed": false}));
+    let copy = lightcraft_catalog::PhotoId(new);
+    let mut ops = copy_album_memberships(s, id, copy);
+    // Put the edit on top and expand the stack so both photos are visible.
+    ops.extend(s.catalog.group_ops(copy, &[copy, id], false));
+    if !ops.is_empty() {
+        s.commit("Organize External Edit", Op::Batch { ops })?;
+    }
     Ok(json!({"path": out, "id": new, "original": id.0}))
 }
 
@@ -355,11 +373,7 @@ fn duplicate(s: &mut Session, p: &Value) -> Result<Value> {
         q.history.clear();
         q.versions.retain(|v| !v.auto);
         let mut ops = vec![Op::AddPhoto { photo: Box::new(q) }];
-        for a in s.catalog.albums().filter(|a| !a.is_smart() && !a.folder && a.photos.contains(&id)) {
-            let mut photos = a.photos.clone();
-            photos.push(new);
-            ops.push(Op::SetAlbumPhotos { id: a.id, photos });
-        }
+        ops.extend(copy_album_memberships(s, id, new));
         s.commit("Duplicate", Op::Batch { ops })?;
         made.push(new);
     }
@@ -395,7 +409,7 @@ pub fn edit_specs() -> Vec<CommandSpec> {
             "Edit Copy for External Editor",
             [],
             None,
-            "{ids?, colorSpace?: adobeRgb (default) | proPhoto | displayP3 | srgb, format?: tiff (default) | psd, bitDepth?: 16 (default) | 8, dir?} — render each selected photo (or `ids`, at most 50) with its edits as `<name>-Edit.tif` (or `.psd`, flat, which PhotoCraft saves back to in place) next to it, add each stacked on its original and select the copies → {path, id, original (the first copy), copies: [{path, id, original}]} (the app then opens them in the external editor)",
+            "{ids?, colorSpace?: adobeRgb (default) | proPhoto | displayP3 | srgb, format?: tiff (default) | psd, bitDepth?: 16 (default) | 8, dir?} — render each selected photo (or `ids`, at most 50) with its edits as `<name>-Edit.tif` (or `.psd`, flat, which PhotoCraft saves back to in place) next to it, add each to the original’s regular albums, stack it on its original and select the copies → {path, id, original (the first copy), copies: [{path, id, original}]} (the app then opens them in the external editor)",
             has_active,
             edit_external
         ),

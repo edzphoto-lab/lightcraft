@@ -29,14 +29,20 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
           shared-key: edz-macos-intel
-      - name: Build isolated preview
-        run: bash packaging/edz/build-macos.sh
+      - name: Install icon renderer
+        run: brew install resvg
+      - name: Build versioned EdZ Lab DMG
+        env:
+          LIGHTCRAFT_EDZ_LAB: '1'
+        run: |
+          source packaging/env.sh
+          export LIGHTCRAFT_VERSION="$VERSION-edz.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          bash packaging/macos/package.sh --arch x86_64
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: LightCraft-EdZ-Lab-macOS-Intel
           path: |
-            dist/release/LightCraft-EdZ-Lab-macOS-Intel.zip
-            dist/release/LightCraft-EdZ-Lab-macOS-Intel.zip.sha256
+            dist/release/lightcraft-edz-lab-*-macos-x86_64.dmg
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

@@ -53,7 +53,7 @@ Detection is currently disabled on Windows, Linux and the web.
 1. Select a photo and choose the named editor in **Photo → Edit In** or the
    photo's right-click **Edit In** menu.
 2. LightCraft renders the current corrections into a separate file, assigns a
-   unique filename and adds the copy to a stack with the source photograph.
+   unique filename, adds the copy to the original’s regular albums, and stacks it with the source photograph.
 3. Edit in the chosen application and save to the **same TIFF path**.
 4. Return to LightCraft. The existing window-focus handler reloads the tracked
    copies. **Photo → Reload from Disk** is also available.

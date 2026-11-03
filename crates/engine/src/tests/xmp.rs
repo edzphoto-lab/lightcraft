@@ -1077,6 +1077,11 @@ fn external_edit_copy_is_stacked() {
     let mut s = Session::new().with_fs();
     s.execute("library.import", &json!({"paths": [src.to_string_lossy()]})).unwrap();
     let orig = s.active().unwrap();
+    let album = s.execute("album.create", &json!({"name": "Montain couleur", "addSelected": false})).unwrap()["id"].as_u64().unwrap();
+    let other = s.execute("album.create", &json!({"name": "Other", "addSelected": false})).unwrap()["id"].as_u64().unwrap();
+    s.execute("album.addPhotos", &json!({"id": album, "ids": [orig.0]})).unwrap();
+    s.execute("library.source", &json!({"kind": "album", "id": album})).unwrap();
+    s.execute("library.select", &json!({"ids": [orig.0]})).unwrap();
     s.execute("develop.set", &json!({"control": "light.exposure", "value": 1.0})).unwrap();
     let r = s.execute("photo.editExternal", &json!({})).unwrap();
     let path = r["path"].as_str().unwrap().to_string();
@@ -1088,6 +1093,9 @@ fn external_edit_copy_is_stacked() {
     assert_eq!(s.active(), Some(new));
     let st = s.catalog.stack_of(new).expect("stacked");
     assert_eq!((st.top(), st.photos.contains(&orig)), (new, true));
+    assert!(s.visible_cloned().contains(&new), "the edit is visible in the original's album");
+    assert_eq!(s.catalog.album(lightcraft_catalog::AlbumId(album)).unwrap().photos, vec![orig, new]);
+    assert!(s.catalog.album(lightcraft_catalog::AlbumId(other)).unwrap().photos.is_empty());
     let r2 = s.execute("photo.editExternal", &json!({"colorSpace": "proPhoto"})).unwrap();
     assert!(r2["path"].as_str().unwrap().ends_with("beach-Edit-Edit.tif") || r2["path"].as_str().unwrap().contains("-2"), "{r2}");
     let _ = std::fs::remove_dir_all(&dir);

@@ -244,7 +244,7 @@ fn main() -> eframe::Result {
     let came_up_app = came_up.clone();
     // how the window was when the app was last used (checked: the settings file is a file)
     let opens_as = prefs.as_ref().and_then(|ui| ui.window).and_then(lightcraft_ui_egui::window_place::WindowPlace::checked);
-    let options = eframe::NativeOptions {
+    let mut options = eframe::NativeOptions {
         renderer,
         viewport: as_remembered(egui::ViewportBuilder::default().with_title("LightCraft"), opens_as)
             .with_min_inner_size(lightcraft_ui_egui::window_place::MIN_SIZE)
@@ -253,16 +253,17 @@ fn main() -> eframe::Result {
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
             .with_title_shown(false)
-            .with_icon(app_icon())
             // Wayland matches the window to packaging/linux/ai.storyteller.lightcraft.desktop by this id
             .with_app_id(APP_ID),
         wgpu_options,
         ..Default::default()
     };
+    // The EdZ macOS bundle supplies its own icon, including the running Dock icon.
+    if !cfg!(target_os = "macos") || option_env!("LIGHTCRAFT_EDZ_LAB") != Some("1") {
+        options.viewport = options.viewport.with_icon(app_icon());
+    }
     // the app's copy: `log_file` is still named in the message of a start that fails
     let app_log_file = log_file.clone();
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let mut options = options;
     // winit has no file drag-and-drop on Wayland (only on X11), so dropping files from the file
     // manager showed a "no" cursor. Run through XWayland when it's there; LIGHTCRAFT_WAYLAND=1
     // keeps the native Wayland backend.
@@ -289,7 +290,7 @@ fn main() -> eframe::Result {
                 // HDR display: SDR unless the surface, platform and display all allow HDR
                 hdr_display::report(cc.wgpu_render_state.as_ref().map(|r| r.target_format));
                 let mut app = LightcraftApp::new(session, services(cc, app_log_file.as_deref()));
-                app.set_startup_update_check(true);
+                app.set_startup_update_check(option_env!("LIGHTCRAFT_EDZ_LAB") != Some("1"));
                 if let Some(ui) = prefs {
                     app.ui = ui;
                 }
