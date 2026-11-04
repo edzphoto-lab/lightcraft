@@ -1,0 +1,27 @@
+name: EdZ Windows x64 installer
+on:
+  push:
+    branches: [build/windows-x64-preview]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: edz-windows-x64-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  windows:
+    if: github.repository == 'edzphoto-lab/lightcraft'
+    uses: storytold/craft-common-actions/.github/workflows/gate.yml@main
+    with:
+      os: '["windows-2022"]'
+      toolchain: '1.95.0'
+      targets: wasm32-unknown-unknown,x86_64-pc-windows-msvc
+      tools: ''
+      craft-fonts-ref: b076417b5880bd4154bd22f00695b1d28c6bea83
+      timeout-minutes: 180
+      env: |
+        CARGO_BUILD_JOBS=3
+        RUST_TEST_THREADS=3
+        LIGHTCRAFT_EDZ_LAB=1
+        LIGHTCRAFT_VERSION=0.17.2
+      command: pwsh -NoProfile -File packaging/windows/edz-preview.ps1
