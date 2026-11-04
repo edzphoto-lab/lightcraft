@@ -226,7 +226,26 @@ pub enum TiffCompression {
 
 /// Encode TIFF: 8/16-bit integer or 32-bit float, gray/RGB with optional (unassociated) alpha.
 /// ICC and XMP are embedded; EXIF is not (write it through the TIFF writer in `lightcraft-tiff`).
+/// For 16-bit ZIP, incompressible samples use an uncompressed TIFF when that is smaller.
 pub fn encode_tiff(img: &EncodeImage, compression: TiffCompression, meta: &EncodeMeta) -> Result<Vec<u8>> {
+    let encoded = encode_tiff_with(img, compression, meta)?;
+    // ZIP can expand noisy 16-bit samples. Keep the smaller lossless representation, including
+    // the same metadata. Most photos need only one encode: a file smaller than its raw sample
+    // payload cannot exceed an uncompressed TIFF, which also has an IFD and metadata.
+    if compression == TiffCompression::Deflate && matches!(img.samples, Samples::U16(_)) {
+        let channels = if img.channels == 2 { 4 } else { u64::from(img.channels) };
+        let payload = u64::from(img.width).saturating_mul(u64::from(img.height)).saturating_mul(channels).saturating_mul(2);
+        if encoded.len() as u64 > payload {
+            let plain = encode_tiff_with(img, TiffCompression::None, meta)?;
+            if plain.len() < encoded.len() {
+                return Ok(plain);
+            }
+        }
+    }
+    Ok(encoded)
+}
+
+fn encode_tiff_with(img: &EncodeImage, compression: TiffCompression, meta: &EncodeMeta) -> Result<Vec<u8>> {
     use tiff::encoder::{Compression, DeflateLevel, TiffEncoder};
     use tiff::tags::Predictor;
     img.validate()?;

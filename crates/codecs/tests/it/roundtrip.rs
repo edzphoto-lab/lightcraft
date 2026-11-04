@@ -932,3 +932,33 @@ fn jxl_bad_input_is_an_error() {
         encode_jxl(&EncodeImage::new(1, 1, 3, Samples::U8(&one)), &JxlOptions { quality: 1, ..Default::default() }, &EncodeMeta::default()).unwrap();
     assert_eq!(decode(&b, DecodeOptions::default()).unwrap().width, 1);
 }
+
+#[test]
+fn noisy_sixteen_bit_zip_falls_back_without_losing_samples_or_metadata() {
+    let mut state = 0x2882_u64;
+    let samples: Vec<u16> = (0..64 * 64 * 4)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 32) as u16
+        })
+        .collect();
+    let image = EncodeImage::new(64, 64, 4, Samples::U16(&samples));
+    let profile = write_named(NamedSpace::AdobeRgb);
+    let meta = EncodeMeta { icc: Some(&profile), xmp: Some("<x/>"), ppi: Some(300), ..Default::default() };
+    let plain = encode_tiff(&image, TiffCompression::None, &meta).unwrap();
+    let zip = encode_tiff(&image, TiffCompression::Deflate, &meta).unwrap();
+    assert_eq!(zip, plain, "incompressible samples must use the smaller uncompressed TIFF");
+    let mut decoder = tiff::decoder::Decoder::new(std::io::Cursor::new(&zip)).unwrap();
+    assert_eq!(decoder.get_tag_u32(tiff::tags::Tag::Compression).unwrap(), 1);
+    match decoder.read_image().unwrap() {
+        tiff::decoder::DecodingResult::U16(back) => assert_eq!(back, samples),
+        _ => panic!("16-bit samples must be preserved"),
+    }
+    let decoded = decode(&zip, DecodeOptions::default()).unwrap();
+    assert_eq!(decoded.bit_depth, 16);
+    assert!(decoded.has_alpha);
+    assert_eq!(decoded.icc.as_deref(), Some(profile.as_slice()));
+    assert_eq!(decoded.xmp.as_deref(), Some("<x/>"));
+}

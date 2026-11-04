@@ -1,4 +1,5 @@
 name: EdZ Windows x64 installer
+# Personal fork distribution, separate from the official shared release pipeline.
 on:
   push:
     branches: [build/windows-x64-preview]
@@ -11,17 +12,76 @@ concurrency:
 jobs:
   windows:
     if: github.repository == 'edzphoto-lab/lightcraft'
-    uses: storytold/craft-common-actions/.github/workflows/gate.yml@main
-    with:
-      os: '["windows-2022"]'
-      toolchain: '1.95.0'
-      targets: wasm32-unknown-unknown,x86_64-pc-windows-msvc
-      tools: ''
-      craft-fonts-ref: b076417b5880bd4154bd22f00695b1d28c6bea83
-      timeout-minutes: 180
-      env: |
-        CARGO_BUILD_JOBS=3
-        RUST_TEST_THREADS=3
-        LIGHTCRAFT_EDZ_LAB=1
-        LIGHTCRAFT_VERSION=0.17.2
-      command: pwsh -NoProfile -File packaging/windows/edz-preview.ps1
+    runs-on: windows-2022
+    timeout-minutes: 180
+    env:
+      CARGO_BUILD_JOBS: '3'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_RELEASE_DEBUG: '0'
+      RUST_TEST_THREADS: '3'
+      LIGHTCRAFT_EDZ_LAB: '1'
+      LIGHTCRAFT_VERSION: '0.17.2'
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: '-C target-feature=+crt-static'
+      CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+      CRAFT_FONTS_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: storytold/craft-fonts
+          ref: b076417b5880bd4154bd22f00695b1d28c6bea83
+          path: craft-fonts
+      - uses: storytold/craft-common-actions/actions/checkout-craft-i18n@main
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: '1.95.0'
+          targets: x86_64-pc-windows-msvc,wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          key: edz-windows-x64-release
+          cache-on-failure: true
+          save-if: ${{ github.repository == 'edzphoto-lab/lightcraft' }}
+      - name: Prepare red versioned EdZ application
+        shell: pwsh
+        run: ./packaging/windows/edz-preview.ps1 -Stage Prepare
+      - name: Formatting and codec static analysis
+        shell: pwsh
+        run: |
+          cargo fmt --all -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo clippy --locked -p lightcraft-codecs --all-targets --features heif -- -D warnings
+          exit $LASTEXITCODE
+      - name: Windows release tests (codecs and all photo exports)
+        shell: pwsh
+        run: |
+          cargo test --release --locked --target x86_64-pc-windows-msvc -p lightcraft-codecs --features heif
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --release --locked --target x86_64-pc-windows-msvc -p lightcraft-engine --lib --features sam,denoise,lightcraft-codecs/heif export::tests -- --nocapture
+          exit $LASTEXITCODE
+      - name: Repository checks
+        shell: pwsh
+        run: |
+          foreach ($check in 'layers', 'assets', 'parity', 'wasm') {
+            cargo xtask $check
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Build installer, install, render and uninstall
+        shell: pwsh
+        run: ./packaging/windows/edz-preview.ps1 -Stage Package
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: success()
+        with:
+          name: LightCraft-EdZ-Lab-0.17.2-Windows-x64
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: failure()
+        with:
+          name: LightCraft-EdZ-Lab-0.17.2-Windows-diagnostics
+          path: |
+            dist/release/*.txt
+            dist/release/*.log
+          if-no-files-found: ignore
+          retention-days: 7

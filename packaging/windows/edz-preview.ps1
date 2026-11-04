@@ -1,4 +1,5 @@
 <# Personal Windows x64 package. Run only in a fresh, disposable build checkout. #>
+param([Parameter(Mandatory = $true)] [ValidateSet('Prepare', 'Package')] [string] $Stage)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -16,42 +17,46 @@ function Native([string] $what, [scriptblock] $run) {
   & $run
   if ($LASTEXITCODE -ne 0) { throw "$what exited $LASTEXITCODE" }
 }
-Native 'Install pinned build utilities' { npm install --prefix $tools --no-audit --no-fund @resvg/resvg-js@2.6.2 @actions/artifact@2.3.2 }
+if ($Stage -eq 'Prepare') {
+  Native 'Install pinned icon renderer' { npm install --prefix $tools --no-audit --no-fund @resvg/resvg-js@2.6.2 }
+}
 $env:NODE_PATH = Join-Path $tools 'node_modules'
 $transcript = Join-Path $env:DIST 'validation.txt'
-Start-Transcript -Path $transcript | Out-Null
-$passed = $false
+Start-Transcript -Path $transcript -Append | Out-Null
 try {
-  Native 'Generate red application icons' { node packaging/windows/edz-icons.cjs }
-  # Separate upgrade identity for EACH version: installing it cannot upgrade/remove another release.
-  $hash = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes("org.edzphoto.lightcraft.windows.$version"))
-  $upgrade = ([guid]::new([byte[]]$hash[0..15])).ToString().ToUpperInvariant()
-  $componentHash = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes("org.edzphoto.lightcraft.windows.app.$version"))
-  $component = ([guid]::new([byte[]]$componentHash[0..15])).ToString().ToUpperInvariant()
-  $wxsPath = Join-Path $PSScriptRoot 'lightcraft.wxs'
-  $wxs = [IO.File]::ReadAllText($wxsPath)
-  $wxs = $wxs.Replace('229BB552-5EFD-479A-BA86-8CB6D926390C', $upgrade).Replace('8A1D3A39-F7C1-47B1-97AE-40C80BF82F4A', $component)
-  $wxs = $wxs.Replace('Name="LightCraft"', "Name=`"$name`"")
-  $wxs = $wxs.Replace('Software\LightCraft', "Software\$name").Replace('App Paths\lightcraft.exe', "App Paths\$name.exe")
-  $wxs = $wxs.Replace('Learning Machines LLC', 'EdZ Lab').Replace('https://getartcraft.com/apps/lightcraft', 'https://github.com/edzphoto-lab/lightcraft')
-  $wxs = $wxs.Replace('Launch LightCraft', "Launch $name").Replace('LightCraft has been installed.', "$name has been installed.")
-  [IO.File]::WriteAllText($wxsPath, $wxs)
-  $policyPath = Join-Path $PSScriptRoot 'install-policy.wxi'
-  $policy = [IO.File]::ReadAllText($policyPath).Replace('Software\LightCraft', "Software\$name").Replace('App Paths\lightcraft.exe', "App Paths\$name.exe").Replace('\ArtCraft\LightCraft\', "\ArtCraft\$name\")
-  [IO.File]::WriteAllText($policyPath, $policy)
-  $jsonPath = Join-Path $PSScriptRoot 'install-policy.json'
-  $json = Get-Content -Raw $jsonPath | ConvertFrom-Json
-  $json.name = $name
-  $json.upgradeCode = $upgrade
-  foreach ($entry in $json.registry) {
-    $entry[1] = $entry[1].Replace('Software\LightCraft', "Software\$name").Replace('App Paths\lightcraft.exe', "App Paths\$name.exe")
-  }
-  $json | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 $jsonPath
-  $buildPath = Join-Path $root 'apps\lightcraft\build.rs'
-  $build = [IO.File]::ReadAllText($buildPath).Replace('"ProductName", "LightCraft"', "`"ProductName`", `"$name`"").Replace('"FileDescription", "LightCraft photo library and raw developer"', "`"FileDescription`", `"$name`"")
-  [IO.File]::WriteAllText($buildPath, $build)
+  if ($Stage -eq 'Prepare') {
+    Native 'Generate red application icons' { node packaging/windows/edz-icons.cjs }
+    # Separate upgrade identity for EACH version: installing it cannot upgrade/remove another release.
+    $hash = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes("org.edzphoto.lightcraft.windows.$version"))
+    $upgrade = ([guid]::new([byte[]]$hash[0..15])).ToString().ToUpperInvariant()
+    $componentHash = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes("org.edzphoto.lightcraft.windows.app.$version"))
+    $component = ([guid]::new([byte[]]$componentHash[0..15])).ToString().ToUpperInvariant()
+    $wxsPath = Join-Path $PSScriptRoot 'lightcraft.wxs'
+    $wxs = [IO.File]::ReadAllText($wxsPath)
+    $wxs = $wxs.Replace('229BB552-5EFD-479A-BA86-8CB6D926390C', $upgrade).Replace('8A1D3A39-F7C1-47B1-97AE-40C80BF82F4A', $component)
+    $wxs = $wxs.Replace('Name="LightCraft"', "Name=`"$name`"")
+    $wxs = $wxs.Replace('Software\LightCraft', "Software\$name").Replace('App Paths\lightcraft.exe', "App Paths\$name.exe")
+    $wxs = $wxs.Replace('Learning Machines LLC', 'EdZ Lab').Replace('https://getartcraft.com/apps/lightcraft', 'https://github.com/edzphoto-lab/lightcraft')
+    $wxs = $wxs.Replace('Launch LightCraft', "Launch $name").Replace('LightCraft has been installed.', "$name has been installed.")
+    [IO.File]::WriteAllText($wxsPath, $wxs)
+    $policyPath = Join-Path $PSScriptRoot 'install-policy.wxi'
+    $policy = [IO.File]::ReadAllText($policyPath).Replace('Software\LightCraft', "Software\$name").Replace('App Paths\lightcraft.exe', "App Paths\$name.exe").Replace('\ArtCraft\LightCraft\', "\ArtCraft\$name\")
+    [IO.File]::WriteAllText($policyPath, $policy)
+    $jsonPath = Join-Path $PSScriptRoot 'install-policy.json'
+    $json = Get-Content -Raw $jsonPath | ConvertFrom-Json
+    $json.name = $name
+    $json.upgradeCode = $upgrade
+    foreach ($entry in $json.registry) {
+      $entry[1] = $entry[1].Replace('Software\LightCraft', "Software\$name").Replace('App Paths\lightcraft.exe', "App Paths\$name.exe")
+    }
+    $json | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 $jsonPath
+    $buildPath = Join-Path $root 'apps\lightcraft\build.rs'
+    $build = [IO.File]::ReadAllText($buildPath).Replace('"ProductName", "LightCraft"', "`"ProductName`", `"$name`"").Replace('"FileDescription", "LightCraft photo library and raw developer"', "`"FileDescription`", `"$name`"")
+    [IO.File]::WriteAllText($buildPath, $build)
 
-  Native 'Full Rust quality gate' { cargo xtask ci }
+    Write-Output "PASS prepared $name Windows build inputs."
+    return
+  }
   Native 'Install WiX 5.0.2' { dotnet tool install --global wix --version 5.0.2 }
   Native 'Build and package x64' { & packaging/windows/package.ps1 -Arch x64 }
   foreach ($file in Get-ChildItem $env:DIST -File | Where-Object Extension -in '.msi', '.zip') {
@@ -86,11 +91,8 @@ try {
     "$((Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant())  $($file.Name)"
   }
   $hashLines | Set-Content -Encoding ascii (Join-Path $env:DIST 'SHA256SUMS.txt')
-  $passed = $true
   Write-Output "PASS $name Windows x64 installer and portable ZIP ready. External-editor automatic discovery remains macOS-only; Windows supports manually selected executables. Unsigned personal build."
 } finally {
   Stop-Transcript | Out-Null
-  $env:EDZ_ARTIFACT_DIR = $env:DIST
-  $env:EDZ_ARTIFACT_NAME = if ($passed) { "LightCraft-EdZ-Lab-$version-Windows-x64" } else { "LightCraft-EdZ-Lab-$version-Windows-diagnostics" }
-  Native 'Save downloadable build outputs' { node packaging/windows/edz-upload.cjs }
+  # Uploads run as an Actions step: shell commands do not receive the runtime artifact token.
 }
