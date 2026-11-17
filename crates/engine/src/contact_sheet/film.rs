@@ -17,6 +17,7 @@ const FILM: [u8; 4] = [57, 47, 39, 255];
 const HOLE: [u8; 4] = [16, 14, 13, 255];
 const INK: [u8; 3] = [38, 33, 28];
 const EDGE_INK: [u8; 3] = [245, 234, 213];
+const EDGE_INK_OPAQUE: [u8; 4] = [245, 234, 213, 255];
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Fields {
@@ -110,7 +111,9 @@ fn blank(width: usize) -> Rgba8 {
             text(&mut image, &number, x + px(width, 69), ny, px(width, 29), px(width, 12), EDGE_INK);
         }
         if slot > 0 {
-            text(&mut image, &format!("▹ {slot}A"), x, y + h + px(width, 6), px(width, 30), px(width, 8), EDGE_INK);
+            let baseline = y + h + px(width, 10);
+            edge_arrow(&mut image, x + px(width, 1), baseline, width);
+            text(&mut image, &format!("{slot}A"), x + px(width, 12), y + h + px(width, 6), px(width, 27), px(width, 8), EDGE_INK);
         }
     }
     image
@@ -119,7 +122,7 @@ fn blank(width: usize) -> Rgba8 {
 pub fn header(image: &mut Rgba8, fields: &Fields) {
     let w = image.width;
     for (label, input, x, line, end) in
-        [("DATE", &fields.date, 42, 81, 211), ("SUBJECT", &fields.subject, 246, 308, 470), ("TECHNICAL DATA", &fields.technical, 505, 615, 758)]
+        [("DATE", &fields.date, 42, 81, 211), ("SUBJECT", &fields.subject, 246, 308, 470), ("TECHNICAL DATA", &fields.technical, 505, 626, 758)]
     {
         text(image, label, px(w, x), px(w, 21), px(w, line - x), px(w, 17), INK);
         let line_w = px(w, end - line);
@@ -130,6 +133,20 @@ pub fn header(image: &mut Rgba8, fields: &Fields) {
             text(image, &line_text, line_x + px(w, 3), px(w, 20), line_w - px(w, 6), px(w, 16), INK);
         }
     }
+}
+
+// A film edge mark is drawn independently of the availability of an arrow glyph.
+fn edge_arrow(image: &mut Rgba8, x: usize, center: usize, width: usize) {
+    let length = px(width, 9);
+    let radius = px(width, 2);
+    let stroke = (px(width, 1) / 2).max(1);
+    for dx in 0..length {
+        let wing = radius * (length - dx) / length;
+        for y in [center - wing, center + wing] {
+            fill(image, x + dx, y, 1, stroke, EDGE_INK_OPAQUE);
+        }
+    }
+    fill(image, x, center - radius, stroke, radius * 2 + stroke, EDGE_INK_OPAQUE);
 }
 
 fn text(image: &mut Rgba8, value: &str, x: usize, y: usize, w: usize, h: usize, color: [u8; 3]) {
