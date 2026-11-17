@@ -2,9 +2,11 @@
 
 use super::{Document, blit};
 use crate::export::{ExportFormat, ExportOptions, encode_image};
-use crate::{Session, media::RenderJob, text::TextLayout};
+use crate::media::{RenderJob, fit_for_display};
+use crate::{Session, text::TextLayout};
 use lightcraft_catalog::PhotoId;
-use lightcraft_pipeline::{OutputDepth, OutputSpace};
+use lightcraft_geom::Orientation;
+use lightcraft_pipeline::{OutputDepth, OutputSpace, native_output_size};
 use lightcraft_raster::Rgba8;
 
 pub const CAPACITY: usize = 36;
@@ -36,10 +38,22 @@ pub fn prepare(session: &mut Session, ids: &[PhotoId], full: bool) -> Result<Pre
         return Err("A film sheet has at most 36 frames".into());
     }
     let width = if full { EXPORT_WIDTH } else { PREVIEW_WIDTH };
+    let (w, h) = (px(width, 116), px(width, 83));
     let mut photos = Vec::with_capacity(ids.len());
     for &id in ids {
-        let name = session.catalog.photo(id).ok_or("No such photo")?.file_name.clone();
-        let job = session.export_job(id, px(width, 116), px(width, 83), OutputSpace::Srgb, OutputDepth::U8)?;
+        let photo = session.catalog.photo(id).ok_or("No such photo")?;
+        let (src_w, src_h) = (photo.width as usize, photo.height as usize);
+        let (crop_w, crop_h) = native_output_size(src_w.max(1), src_h.max(1), &photo.develop);
+        // Reserve the frame's whole long edge for a portrait before turning it.
+        let (max_w, max_h) = if src_w == 0 || src_h == 0 {
+            (w, w)
+        } else if crop_h > crop_w {
+            (h, w)
+        } else {
+            (w, h)
+        };
+        let name = photo.file_name.clone();
+        let job = session.export_job(id, max_w, max_h, OutputSpace::Srgb, OutputDepth::U8)?;
         photos.push((name, job));
     }
     Ok(Prepared { width, photos })
@@ -48,14 +62,16 @@ pub fn prepare(session: &mut Session, ids: &[PhotoId], full: bool) -> Result<Pre
 impl Prepared {
     pub fn render(self, progress: &mut dyn FnMut(usize, &str) -> bool) -> Result<Rgba8, String> {
         let mut sheet = blank(self.width);
+        let (w, h) = (px(self.width, 116), px(self.width, 83));
         for (slot, (name, job)) in self.photos.into_iter().enumerate() {
             if !progress(slot, &name) {
                 return Err("Contact sheet cancelled".into());
             }
             let image = job.run().rendered.map_err(|error| format!("{name}: {error}"))?.image;
             let (x, y) = frame(self.width, slot);
-            let w = px(self.width, 116);
-            let h = px(self.width, 83);
+            let image = if image.height > image.width { image.into_oriented(Orientation::Rotate270) } else { image };
+            // File dimensions can differ from catalog dimensions if an original was replaced.
+            let image = if image.width > w || image.height > h { fit_for_display(&image, w, h) } else { image };
             if image.width > w || image.height > h {
                 return Err(format!("{name}: render exceeded frame"));
             }
@@ -181,7 +197,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn film_sheet_uses_the_developed_crop_and_exposure() {
+    fn film_sheet_develops_the_crop_and_exposure_then_turns_the_portrait() {
         use serde_json::json;
 
         let mut session = Session::with_demo();
@@ -192,15 +208,18 @@ mod tests {
         session.execute("develop.set", &json!({"control": "light.exposure", "value": 1.5})).unwrap();
         let w = px(PREVIEW_WIDTH, 116);
         let h = px(PREVIEW_WIDTH, 83);
-        let developed = session.render_export(id, w, h, OutputSpace::Srgb, OutputDepth::U8).unwrap().image;
+        let developed = session.render_export(id, h, w, OutputSpace::Srgb, OutputDepth::U8).unwrap().image;
         assert!(developed.width < developed.height);
+        assert!(developed.height > h, "the portrait must use the frame's long edge");
         let after = prepare(&mut session, &[id], false).unwrap().render(&mut |_, _| true).unwrap();
         let (x, y) = frame(PREVIEW_WIDTH, 0);
-        let offset = (y + (h - developed.height) / 2) * PREVIEW_WIDTH + x + (w - developed.width) / 2;
+        let offset = (y + (h - developed.width) / 2) * PREVIEW_WIDTH + x + (w - developed.height) / 2;
         assert_ne!(before.data, crop_only.data);
         assert_ne!(crop_only.data, after.data);
-        for (src, dst) in developed.data.chunks_exact(developed.width).zip(after.data[offset..].chunks(PREVIEW_WIDTH)) {
-            assert_eq!(src, &dst[..developed.width]);
+        for (row, actual) in after.data[offset..].chunks(PREVIEW_WIDTH).take(developed.width).enumerate() {
+            for (col, pixel) in actual.iter().take(developed.height).enumerate() {
+                assert_eq!(*pixel, developed.get(developed.width - 1 - row, col), "90° counterclockwise at ({col}, {row})");
+            }
         }
     }
 
