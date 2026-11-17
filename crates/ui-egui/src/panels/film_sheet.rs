@@ -96,10 +96,13 @@ impl State {
                 self.pending = None;
             }
         }
-        if !ids.is_empty() && self.pending.is_none() && self.pixels.is_none() && self.error.is_none() {
-            if let Err(error) = self.start(ctx, session, ids, key) {
-                self.error = Some(error);
-            }
+        if !ids.is_empty()
+            && self.pending.is_none()
+            && self.pixels.is_none()
+            && self.error.is_none()
+            && let Err(error) = self.start(ctx, session, ids, key)
+        {
+            self.error = Some(error);
         }
         if self.drawn_fields.as_ref() != Some(&self.fields) {
             let mut image = self.pixels.as_ref().unwrap_or_else(|| self.blank.get_or_insert_with(film::blank_preview)).clone();
@@ -184,14 +187,21 @@ pub(crate) fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 });
             }
             ui.add_space(10.0);
-            let preview = ui.add_sized(vec2(width, 28.0), egui::Button::new(tr("Preview")).selected(app.film_sheet.enlarged));
+            let active = app.film_sheet.enlarged;
+            let preview = ui.add_sized(
+                vec2(width, 28.0),
+                egui::Button::new(egui::RichText::new(tr("Preview")).font(style.semibold(11.5)))
+                    .selected(active)
+                    .fill(if active { style.pressed } else { style.button })
+                    .stroke(egui::Stroke::new(1.0, style.button_border)),
+            );
             crate::widgets::register(ui, "button:filmSheetPreview", preview.rect);
             if preview.clicked() {
                 let _ = app.run("filmSheet.preview", json!({}));
             }
             let response = ui
                 .add_enabled_ui(!ids.is_empty() && app.export.is_none() && app.services.picker.is_some(), |ui| {
-                    ui.add_sized(vec2(width, 32.0), egui::Button::new(tr(EXPORT_LABEL)))
+                    ui.add_sized(vec2(width, 32.0), egui::Button::new(egui::RichText::new(tr(EXPORT_LABEL)).font(style.semibold(11.5))))
                 })
                 .inner;
             crate::widgets::register(ui, "button:filmSheetExport", response.rect);

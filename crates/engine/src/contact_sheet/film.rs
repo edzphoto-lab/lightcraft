@@ -1,7 +1,7 @@
 //! A 35 mm contact sheet with a shared composition for the editor and JPEG export.
 
 use super::{Document, blit};
-use crate::export::{Anchor, ExportFormat, ExportOptions, Watermark, draw_watermark_in, encode_image};
+use crate::export::{ExportFormat, ExportOptions, encode_image};
 use crate::{Session, media::RenderJob, text::TextLayout};
 use lightcraft_catalog::PhotoId;
 use lightcraft_pipeline::{OutputDepth, OutputSpace};
@@ -106,7 +106,7 @@ fn blank(width: usize) -> Rgba8 {
             }
         }
         let number = (slot + 1).to_string();
-        for ny in [y - px(width, 15), y + h + px(width, 4)] {
+        for ny in [y - px(width, 15), y + h + px(width, 2)] {
             text(&mut image, &number, x + px(width, 69), ny, px(width, 29), px(width, 12), EDGE_INK);
         }
         if slot > 0 {
@@ -127,24 +127,13 @@ pub fn header(image: &mut Rgba8, fields: &Fields) {
         fill(image, line_x, px(w, 36), line_w, px(w, 1), [83, 75, 65, 255]);
         let line_text: String = input.chars().filter(|c| !c.is_control()).take(256).collect();
         if !line_text.is_empty() {
-            field_text(image, &line_text, line_x + px(w, 3), px(w, 20), line_w - px(w, 6), px(w, 16));
+            text(image, &line_text, line_x + px(w, 3), px(w, 20), line_w - px(w, 6), px(w, 16), INK);
         }
     }
 }
 
-fn text(image: &mut Rgba8, label: &str, x: usize, y: usize, w: usize, h: usize, color: [u8; 3]) {
-    draw_watermark_in(
-        image,
-        &Watermark { text: label.into(), size: 0.5, opacity: 1.0, anchor: Anchor::Left, inset_x: 0.0, color, shadow: false, ..Default::default() },
-        x,
-        y,
-        w,
-        h,
-    );
-}
-
-fn field_text(image: &mut Rgba8, value: &str, x: usize, y: usize, w: usize, h: usize) {
-    let font = h as f32 * 0.72;
+fn text(image: &mut Rgba8, value: &str, x: usize, y: usize, w: usize, h: usize, color: [u8; 3]) {
+    let font = h as f32 * 0.91;
     let Some(layout) = TextLayout::new(value, font, false, crate::CRAFT_FONTS) else { return };
     let size = font * (w as f32 / layout.width.max(1.0)).min(1.0);
     let Some(layout) = TextLayout::new(value, size, false, crate::CRAFT_FONTS) else { return };
@@ -155,7 +144,7 @@ fn field_text(image: &mut Rgba8, value: &str, x: usize, y: usize, w: usize, h: u
             return;
         }
         if let Some(pixel) = image.data.get_mut(gy * image.width + gx) {
-            for (channel, ink) in pixel.iter_mut().zip(INK) {
+            for (channel, ink) in pixel.iter_mut().zip(color) {
                 *channel = (f32::from(*channel) + (f32::from(ink) - f32::from(*channel)) * coverage).round() as u8;
             }
         }

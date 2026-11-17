@@ -122,21 +122,26 @@ pub enum Gesture {
     },
 }
 
-/// Draw the Develop loupe: the optional filmstrip, the fitted or zoomed photo (before/after and
-/// full-screen aware), crop overlays and the render requests for the current view, or, when no
-/// photo is active, the empty-library message if the library is empty and "No photo selected"
-/// otherwise.
-pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
-    let t = Tokens::get(ui.ctx());
+fn canvas_with_filmstrip(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) -> Rect {
     let full = ui.max_rect();
-    let fullscreen = app.ui.fullscreen;
-    let show_film = app.ui.filmstrip && !fullscreen;
+    let show_film = app.ui.filmstrip && !app.ui.fullscreen;
     let film_h = if show_film { t.film_h } else { 0.0 };
     let canvas = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - film_h));
     app.canvas_rect = Some(canvas);
     if show_film {
         filmstrip(app, ui, Rect::from_min_max(pos2(full.left(), canvas.bottom()), full.max));
     }
+    canvas
+}
+
+/// Draw the Develop loupe: the optional filmstrip, the fitted or zoomed photo (before/after and
+/// full-screen aware), crop overlays and the render requests for the current view, or, when no
+/// photo is active, the empty-library message if the library is empty and "No photo selected"
+/// otherwise.
+pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
+    let t = Tokens::get(ui.ctx());
+    let fullscreen = app.ui.fullscreen;
+    let canvas = canvas_with_filmstrip(app, ui, &t);
     #[cfg(not(target_arch = "wasm32"))]
     if !fullscreen && app.ui.right == RightPanel::FilmSheet && app.film_sheet.enlarged {
         app.image_rect = None;
