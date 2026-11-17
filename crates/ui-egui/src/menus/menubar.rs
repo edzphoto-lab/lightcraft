@@ -305,6 +305,8 @@ const LAYOUT: &[(&str, &[&str])] = &[
             "panel.presets",
             "panel.versions",
             "panel.activity",
+            #[cfg(not(target_arch = "wasm32"))]
+            "panel.filmSheet",
             "panel.info",
             "panel.keywords",
             "---",
@@ -440,6 +442,8 @@ pub fn checked(app: &LightcraftApp, id: &str) -> Option<bool> {
         "panel.redeye" => panel(RightPanel::RedEye),
         "panel.versions" => panel(RightPanel::Versions),
         "panel.activity" => panel(RightPanel::Activity),
+        #[cfg(not(target_arch = "wasm32"))]
+        "panel.filmSheet" => panel(RightPanel::FilmSheet),
         "panel.info" => panel(RightPanel::Info),
         "panel.keywords" => panel(RightPanel::Keywords),
         "panel.presets" => Some(u.presets),

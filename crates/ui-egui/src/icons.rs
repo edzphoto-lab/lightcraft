@@ -43,6 +43,7 @@ pub enum Icon {
     FlagReject,
     Gear,
     Filmstrip,
+    FilmSheet,
     BeforeAfter,
     ChevronDown,
     ChevronRight,
@@ -417,6 +418,14 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
             pen.rect_fill(5.0, 11.0, 8.5, 13.5, 0.3);
             pen.rect_fill(9.5, 11.0, 13.0, 13.5, 0.3);
             pen.line(&[(2.5, 9.5), (17.5, 9.5)]);
+        }
+        FilmSheet => {
+            pen.rect(3.5, 2.5, 16.5, 17.5, 1.5);
+            for y in [5.0, 8.5, 12.0, 15.5] {
+                for x in [5.0, 13.0] {
+                    pen.rect_fill(x, y - 0.65, x + 2.0, y + 0.65, 0.25);
+                }
+            }
         }
         BeforeAfter => {
             pen.rect(3.0, 4.0, 17.0, 16.0, 1.0);

@@ -137,6 +137,12 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     if show_film {
         filmstrip(app, ui, Rect::from_min_max(pos2(full.left(), canvas.bottom()), full.max));
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    if !fullscreen && app.ui.right == RightPanel::FilmSheet && app.film_sheet.enlarged {
+        app.image_rect = None;
+        super::film_sheet::paint(&app.film_sheet, ui, canvas.shrink(12.0));
+        return;
+    }
     let Some(id) = app.session.active() else {
         show_no_photo(app, ui, canvas);
         return;

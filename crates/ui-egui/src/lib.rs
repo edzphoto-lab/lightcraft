@@ -150,6 +150,8 @@ pub struct LightcraftApp {
     pub caches: Caches,
     pub session: Session,
     pub ui: UiState,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) film_sheet: panels::film_sheet::State,
     pub services: Services,
     pub renderer: render::Renderer,
     pub perf: Perf,

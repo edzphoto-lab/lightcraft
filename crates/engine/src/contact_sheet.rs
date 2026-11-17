@@ -7,6 +7,8 @@ use lightcraft_raster::Rgba8;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod film;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Options {

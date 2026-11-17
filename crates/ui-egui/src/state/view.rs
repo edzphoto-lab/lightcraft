@@ -31,6 +31,8 @@ pub enum RightPanel {
     RedEye,
     Versions,
     Activity,
+    #[cfg(not(target_arch = "wasm32"))]
+    FilmSheet,
     Keywords,
     Info,
     /// The profile browser (part of Edit).

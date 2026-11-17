@@ -391,6 +391,13 @@ impl Headless {
     /// Is anything still in progress (renders, file-system checks the sidebar waits for, queued
     /// input)?
     pub fn busy(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.app.ui.right == crate::state::RightPanel::FilmSheet
+            && crate::docking::exposed(&self.app, crate::docking::Panel::Tools)
+            && self.app.film_sheet.busy()
+        {
+            return true;
+        }
         self.app.renderer.in_flight() > 0
             || crate::panels::left::fs_cached_running(&self.view.ctx) > 0
             || self.app.merge.busy()

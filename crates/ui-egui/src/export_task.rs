@@ -91,35 +91,45 @@ pub fn start_contact_sheet(app: &mut LightcraftApp, params: &Value) -> Result<Va
         return Err("an export is already running".into());
     }
     let path = params.get("path").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).ok_or("missing path")?.to_string();
+    let prepared = lightcraft_engine::contact_sheet::prepare(&mut app.session, params)?;
+    start_sheet(app, path, prepared.len(), move |progress| prepared.run(progress))
+}
+
+pub(crate) fn start_sheet(
+    app: &mut LightcraftApp,
+    path: String,
+    total: usize,
+    render: impl FnOnce(&mut dyn FnMut(usize, &str) -> bool) -> Result<lightcraft_engine::contact_sheet::Document, String> + Send + 'static,
+) -> Result<Value, String> {
+    if app.export.is_some() {
+        return Err("an export is already running".into());
+    }
     app.session.check_write_target(&path)?;
     let guard = app.session.original_guard();
-    let prepared = lightcraft_engine::contact_sheet::prepare(&mut app.session, params)?;
-    let total = prepared.len();
     let write = app.services.write_shared.clone();
     let progress = Arc::new(Mutex::new((0, String::new())));
     let cancel = Arc::new(AtomicBool::new(false));
     let (p, c) = (progress.clone(), cancel.clone());
     let (tx, rx) = channel();
     let work = move || {
-        let result = prepared
-            .run(&mut |done, name| {
-                if let Ok(mut g) = p.lock() {
-                    *g = (done, name.to_string());
-                }
-                !c.load(Ordering::Relaxed)
-            })
-            .and_then(|doc| {
-                if c.load(Ordering::Relaxed) {
-                    return Err("Contact sheet cancelled".into());
-                }
-                guard.check(std::path::Path::new(&path))?;
-                match write {
-                    Some(write) => write(&path, &doc.bytes)?,
-                    None => lightcraft_engine::export::write_file(&path, &doc.bytes)?,
-                }
-                Ok(vec![json!({"path": path, "pages": doc.pages, "photos": doc.photos, "bytes": doc.bytes.len(), "contactSheet": true})])
-            });
-        // a PDF isn't something Photos imports: contact sheets never add to Apple Photos
+        let result = render(&mut |done, name| {
+            if let Ok(mut g) = p.lock() {
+                *g = (done, name.to_string());
+            }
+            !c.load(Ordering::Relaxed)
+        })
+        .and_then(|doc| {
+            if c.load(Ordering::Relaxed) {
+                return Err("Contact sheet cancelled".into());
+            }
+            guard.check(std::path::Path::new(&path))?;
+            match write {
+                Some(write) => write(&path, &doc.bytes)?,
+                None => lightcraft_engine::export::write_file(&path, &doc.bytes)?,
+            }
+            Ok(vec![json!({"path": path, "pages": doc.pages, "photos": doc.photos, "bytes": doc.bytes.len(), "contactSheet": true})])
+        });
+        // Export only the document file. The individual frames stay in the library.
         let _ = tx.send(result.map(|files| (files, None, c.load(Ordering::Relaxed))));
     };
     #[cfg(not(target_arch = "wasm32"))]

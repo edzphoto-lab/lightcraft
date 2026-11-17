@@ -9,6 +9,8 @@ pub mod denoise;
 pub mod detail;
 pub mod edit;
 pub mod empty_library;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod film_sheet;
 pub mod filterbar;
 pub mod grid;
 pub mod histogram;

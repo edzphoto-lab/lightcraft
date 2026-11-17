@@ -996,6 +996,26 @@ fn ui_commands_7(app: &mut LightcraftApp, ctx: &egui::Context, id: &str, p: &Val
             }
             Ok(Value::Null)
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        "panel.filmSheet" => {
+            panel(app, ctx, RightPanel::FilmSheet, "Film Contact Sheet");
+            app.film_sheet.enlarged = false;
+            if app.ui.right == RightPanel::FilmSheet && app.session.active().is_some() {
+                app.ui.view = ViewMode::Detail;
+            }
+            Ok(Value::Null)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        "filmSheet.preview" => {
+            if app.ui.right != RightPanel::FilmSheet {
+                return Some(Err("Open the contact sheet tool first".into()));
+            }
+            app.ui.view = ViewMode::Detail;
+            app.film_sheet.enlarged = !app.film_sheet.enlarged;
+            Ok(json!({"enlarged": app.film_sheet.enlarged}))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        "filmSheet.exportJpeg" => crate::panels::film_sheet::export(app, p),
         "panel.activity" => {
             panel(app, ctx, RightPanel::Activity, "History");
             Ok(Value::Null)

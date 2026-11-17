@@ -56,6 +56,10 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 if icon_button(ui, "activity", Icon::Activity, sz, app.ui.right == RightPanel::Activity, true, "History & Activity (Y)").clicked() {
                     let _ = app.run("panel.activity", json!({}));
                 }
+                #[cfg(not(target_arch = "wasm32"))]
+                if icon_button(ui, "filmSheet", Icon::FilmSheet, sz, app.ui.right == RightPanel::FilmSheet, true, "Film Contact Sheet").clicked() {
+                    let _ = app.run("panel.filmSheet", json!({}));
+                }
                 if icon_button(ui, "more", Icon::More, sz, false, true, "More").clicked() {
                     app.ui.dialog = Some(crate::state::Dialog::About);
                 }

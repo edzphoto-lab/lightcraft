@@ -29,6 +29,8 @@ impl LightcraftApp {
         Self {
             session,
             ui: UiState::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            film_sheet: Default::default(),
             services,
             renderer: render::Renderer::default(),
             perf: Perf::default(),
