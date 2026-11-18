@@ -10,7 +10,7 @@ use lightcraft_pipeline::{OutputDepth, OutputSpace, native_output_size};
 use lightcraft_raster::Rgba8;
 
 pub const CAPACITY: usize = 36;
-const COLUMNS: usize = 6;
+pub const COLUMNS: usize = 6;
 pub const PREVIEW_WIDTH: usize = 1280;
 pub const EXPORT_WIDTH: usize = 3840;
 pub const ASPECT: f32 = 80.0 / 79.0;
@@ -24,7 +24,7 @@ const EDGE_INK_OPAQUE: [u8; 4] = [245, 234, 213, 255];
 enum Lettering {
     Label,
     FilmEdge,
-    Handwritten,
+    Handwritten { baseline: usize, right_aligned: bool },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -34,12 +34,29 @@ pub struct Fields {
     pub technical: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Page {
+    pub number: usize,
+    pub total: usize,
+}
+
+impl Page {
+    pub fn label(self) -> String {
+        match (self.number, self.total) {
+            (1, 3) => "⅓".into(),
+            (2, 3) => "⅔".into(),
+            (number, total) => format!("{number}/{total}"),
+        }
+    }
+}
+
 pub struct Prepared {
     width: usize,
     photos: Vec<(String, RenderJob)>,
+    page: Option<Page>,
 }
 
-pub fn prepare(session: &mut Session, ids: &[PhotoId], full: bool) -> Result<Prepared, String> {
+pub fn prepare(session: &mut Session, ids: &[PhotoId], full: bool, page: Option<Page>) -> Result<Prepared, String> {
     if ids.len() > CAPACITY {
         return Err("A film sheet has at most 36 frames".into());
     }
@@ -62,12 +79,12 @@ pub fn prepare(session: &mut Session, ids: &[PhotoId], full: bool) -> Result<Pre
         let job = session.export_job(id, max_w, max_h, OutputSpace::Srgb, OutputDepth::U8)?;
         photos.push((name, job));
     }
-    Ok(Prepared { width, photos })
+    Ok(Prepared { width, photos, page })
 }
 
 impl Prepared {
     pub fn render(self, progress: &mut dyn FnMut(usize, &str) -> bool) -> Result<Rgba8, String> {
-        let mut sheet = blank(self.width);
+        let mut sheet = blank(self.width, self.photos.len(), self.page);
         let (w, h) = (px(self.width, 116), px(self.width, 83));
         for (slot, (name, job)) in self.photos.into_iter().enumerate() {
             if !progress(slot, &name) {
@@ -89,11 +106,12 @@ impl Prepared {
 
     pub fn jpeg(self, fields: &Fields, progress: &mut dyn FnMut(usize, &str) -> bool) -> Result<Document, String> {
         let photos = self.photos.len();
+        let page = self.page;
         let mut image = self.render(progress)?;
         if !progress(photos, "JPEG") {
             return Err("Contact sheet cancelled".into());
         }
-        header(&mut image, fields);
+        header(&mut image, fields, page);
         let bytes = encode_image(&image, &ExportOptions { format: ExportFormat::Jpeg, quality: 95, ..Default::default() })?;
         Ok(Document { bytes, pages: 1, photos })
     }
@@ -107,17 +125,18 @@ fn frame(width: usize, slot: usize) -> (usize, usize) {
     (px(width, 33 + slot % COLUMNS * 124), px(width, 74 + slot / COLUMNS * 116))
 }
 
-pub fn blank_preview() -> Rgba8 {
-    blank(PREVIEW_WIDTH)
+pub fn blank_preview(frames: usize, page: Option<Page>) -> Rgba8 {
+    blank(PREVIEW_WIDTH, frames, page)
 }
 
-fn blank(width: usize) -> Rgba8 {
+fn blank(width: usize, frames: usize, page: Option<Page>) -> Rgba8 {
+    let rows = if page.is_some() { frames.min(CAPACITY).div_ceil(COLUMNS) } else { COLUMNS };
     let mut image = Rgba8::filled(width, px(width, 790), PAPER);
-    for row in 0..COLUMNS {
+    for row in 0..rows {
         let (_, y) = frame(width, row * COLUMNS);
         fill(&mut image, px(width, 27), y - px(width, 14), px(width, 746), px(width, 111), FILM);
     }
-    for slot in 0..CAPACITY {
+    for slot in 0..rows * COLUMNS {
         let (x, y) = frame(width, slot);
         let w = px(width, 116);
         let h = px(width, 83);
@@ -141,19 +160,48 @@ fn blank(width: usize) -> Rgba8 {
     image
 }
 
-pub fn header(image: &mut Rgba8, fields: &Fields) {
+pub fn header(image: &mut Rgba8, fields: &Fields, page: Option<Page>) {
     let w = image.width;
+    if let Some(page) = page {
+        page_mark(image, page);
+    }
+    let rule = px(w, 51);
     for (label, input, x, line, end) in
         [("DATE", &fields.date, 42, 81, 211), ("SUBJECT", &fields.subject, 246, 308, 470), ("TECHNICAL DATA", &fields.technical, 505, 626, 758)]
     {
-        text(image, label, px(w, x), px(w, 21), px(w, line - x), px(w, 17), Lettering::Label);
+        text(image, label, px(w, x), px(w, 36), px(w, line - x), px(w, 17), Lettering::Label);
         let line_w = px(w, end - line);
         let line_x = px(w, line);
-        fill(image, line_x, px(w, 36), line_w, px(w, 1), [83, 75, 65, 255]);
+        fill(image, line_x, rule, line_w, px(w, 1), [83, 75, 65, 255]);
         let line_text: String = input.chars().filter(|c| !c.is_control()).take(256).collect();
         if !line_text.is_empty() {
-            text(image, &line_text, line_x + px(w, 3), px(w, 15), line_w - px(w, 6), px(w, 21), Lettering::Handwritten);
+            text(
+                image,
+                &line_text,
+                line_x + px(w, 3),
+                px(w, 29),
+                line_w - px(w, 6),
+                px(w, 29),
+                Lettering::Handwritten { baseline: rule, right_aligned: false },
+            );
         }
+    }
+}
+
+fn page_mark(image: &mut Rgba8, page: Page) {
+    let w = image.width;
+    let mut draw = |text_value: &str, left, right, baseline| {
+        let x = px(w, left);
+        text(image, text_value, x, px(w, 2), px(w, right) - x, px(w, 27), Lettering::Handwritten { baseline: px(w, baseline), right_aligned: true });
+    };
+    // Compose the two compact fractions with Kalam digits and a slash.
+    match (page.number, page.total) {
+        (1 | 2, 3) => {
+            draw(&page.number.to_string(), 746, 764, 17);
+            draw("/", 756, 774, 22);
+            draw("3", 767, 782, 25);
+        }
+        _ => draw(&page.label(), 670, 782, 23),
     }
 }
 
@@ -173,7 +221,7 @@ fn edge_arrow(image: &mut Rgba8, x: usize, center: usize, width: usize) {
 
 fn text(image: &mut Rgba8, value: &str, x: usize, y: usize, w: usize, h: usize, lettering: Lettering) {
     let primary = match lettering {
-        Lettering::Handwritten => {
+        Lettering::Handwritten { .. } => {
             crate::CRAFT_FONTS.iter().find(|font| font.family == "Kalam" && font.style == "Bold").map_or(crate::text::TEXT_FONT, |font| font.bytes)
         }
         _ => crate::text::TEXT_FONT,
@@ -182,12 +230,22 @@ fn text(image: &mut Rgba8, value: &str, x: usize, y: usize, w: usize, h: usize, 
         Lettering::FilmEdge => EDGE_INK,
         _ => INK,
     };
-    let font = h as f32 * 0.91;
+    let font = match lettering {
+        Lettering::Handwritten { right_aligned: false, .. } => px(image.width, 28) as f32,
+        Lettering::Handwritten { right_aligned: true, .. } => px(image.width, 23) as f32,
+        _ => h as f32 * 0.91,
+    };
     let Some(layout) = TextLayout::with_primary(value, font, primary, crate::CRAFT_FONTS) else { return };
     let size = font * (w as f32 / layout.width.max(1.0)).min(1.0);
     let Some(layout) = TextLayout::with_primary(value, size, primary, crate::CRAFT_FONTS) else { return };
-    let origin_y = y as f32 + h as f32 - layout.height;
-    layout.draw_in(x as f32, origin_y, (x + w) as f32, (y + h) as f32, |gx, gy, coverage| {
+    let (origin_x, origin_y) = match lettering {
+        Lettering::Handwritten { baseline, right_aligned } => {
+            let left = if right_aligned { (x + w) as f32 - layout.width } else { x as f32 };
+            (left, baseline as f32 - layout.first_baseline())
+        }
+        _ => (x as f32, y as f32 + h as f32 - layout.height),
+    };
+    layout.draw_in(origin_x, origin_y, (x + w) as f32, (y + h) as f32, |gx, gy, coverage| {
         let (Ok(gx), Ok(gy)) = (usize::try_from(gx), usize::try_from(gy)) else { return };
         if !(x..x + w).contains(&gx) || !(y..y + h).contains(&gy) {
             return;
@@ -218,16 +276,16 @@ mod tests {
 
         let mut session = Session::with_demo();
         let id = session.active().expect("demo photo");
-        let before = prepare(&mut session, &[id], false).unwrap().render(&mut |_, _| true).unwrap();
+        let before = prepare(&mut session, &[id], false, None).unwrap().render(&mut |_, _| true).unwrap();
         session.execute("crop.set", &json!({"rect": [0.25, 0.08, 0.65, 0.92]})).unwrap();
-        let crop_only = prepare(&mut session, &[id], false).unwrap().render(&mut |_, _| true).unwrap();
+        let crop_only = prepare(&mut session, &[id], false, None).unwrap().render(&mut |_, _| true).unwrap();
         session.execute("develop.set", &json!({"control": "light.exposure", "value": 1.5})).unwrap();
         let w = px(PREVIEW_WIDTH, 116);
         let h = px(PREVIEW_WIDTH, 83);
         let developed = session.render_export(id, h, w, OutputSpace::Srgb, OutputDepth::U8).unwrap().image;
         assert!(developed.width < developed.height);
         assert!(developed.height > h, "the portrait must use the frame's long edge");
-        let after = prepare(&mut session, &[id], false).unwrap().render(&mut |_, _| true).unwrap();
+        let after = prepare(&mut session, &[id], false, None).unwrap().render(&mut |_, _| true).unwrap();
         let (x, y) = frame(PREVIEW_WIDTH, 0);
         let offset = (y + (h - developed.width) / 2) * PREVIEW_WIDTH + x + (w - developed.height) / 2;
         assert_ne!(before.data, crop_only.data);
@@ -243,16 +301,24 @@ mod tests {
     fn film_sheet_exports_a_4k_jpeg() {
         let mut session = Session::with_demo();
         let id = session.active().expect("demo photo");
-        let document = prepare(&mut session, &[id], true).unwrap().jpeg(&Fields::default(), &mut |_, _| true).unwrap();
+        let document =
+            prepare(&mut session, &[id], true, Some(Page { number: 2, total: 3 })).unwrap().jpeg(&Fields::default(), &mut |_, _| true).unwrap();
         assert!(document.bytes.starts_with(&[0xff, 0xd8]));
         let decoded = lightcraft_codecs::decode(&document.bytes, Default::default()).unwrap();
         let image = decoded.to_srgb8();
         assert_eq!((image.width, image.height), (3840, 3792));
+        let (x, y) = frame(EXPORT_WIDTH, COLUMNS);
+        assert!(image.data[y * EXPORT_WIDTH + x][0] > 200, "unused rows are paper");
+        assert!(
+            (px(EXPORT_WIDTH, 750)..px(EXPORT_WIDTH, 785))
+                .any(|x| { (px(EXPORT_WIDTH, 2)..px(EXPORT_WIDTH, 29)).any(|y| image.data[y * EXPORT_WIDTH + x][0] < 120) }),
+            "the exported JPEG has a page mark in the upper-right corner"
+        );
     }
 
     #[test]
     fn film_sheet_reserves_all_frames_and_keeps_the_header_separate() {
-        let mut sheet = blank_preview();
+        let mut sheet = blank_preview(0, None);
         assert_eq!((sheet.width, sheet.height), (1280, 1264));
         for slot in 0..CAPACITY {
             let (x, y) = frame(sheet.width, slot);
@@ -260,7 +326,7 @@ mod tests {
             assert_eq!(sheet.data[(y - px(sheet.width, 8)) * sheet.width + x], FILM);
         }
         let before = sheet.clone();
-        header(&mut sheet, &Fields { subject: "Séance 0387".into(), ..Default::default() });
+        header(&mut sheet, &Fields { subject: "Séance 0387".into(), ..Default::default() }, None);
         let strips = px(sheet.width, 60) * sheet.width;
         assert_ne!(before.data[..strips], sheet.data[..strips]);
         assert_eq!(before.data[strips..], sheet.data[strips..]);
@@ -268,13 +334,30 @@ mod tests {
     }
 
     #[test]
+    fn descenders_cross_the_rule_without_touching_the_film() {
+        for width in [PREVIEW_WIDTH, EXPORT_WIDTH] {
+            let mut empty = blank(width, 0, None);
+            header(&mut empty, &Fields::default(), None);
+            let mut written = blank(width, 0, None);
+            header(&mut written, &Fields { subject: "Typographie".into(), ..Default::default() }, None);
+            let row_changed = |y: usize| {
+                let range = (y * width + px(width, 308))..(y * width + px(width, 470));
+                written.data[range.clone()] != empty.data[range]
+            };
+            assert!((px(width, 35)..px(width, 51)).any(row_changed), "letters sit above the rule");
+            assert!((px(width, 52)..px(width, 58)).any(row_changed), "descenders extend below it");
+            assert!(!(px(width, 59)..px(width, 74)).any(row_changed), "notes stop before the film");
+        }
+    }
+
+    #[test]
     fn handwritten_fields_fit_their_lines_in_preview_and_export() {
         let fields = Fields { date: "18.11.2026".into(), subject: "Portraits - Jen".into(), technical: "Tri-X 400 / 50 mm".into() };
         for width in [PREVIEW_WIDTH, EXPORT_WIDTH] {
-            let mut empty = blank(width);
-            header(&mut empty, &Fields::default());
-            let mut filled = blank(width);
-            header(&mut filled, &fields);
+            let mut empty = blank(width, 0, None);
+            header(&mut empty, &Fields::default(), None);
+            let mut filled = blank(width, 0, None);
+            header(&mut filled, &fields, None);
             let bounds = [(81, 211), (308, 470), (626, 758)];
             let mut changed = [0; 3];
             for (index, (before, after)) in empty.data.iter().zip(&filled.data).enumerate() {
@@ -284,14 +367,18 @@ mod tests {
                 let (x, y) = (index % width, index / width);
                 let field = bounds.iter().position(|&(start, end)| {
                     (px(width, start) + px(width, 3)..px(width, start) + px(width, end - start) - px(width, 3)).contains(&x)
-                        && (px(width, 15)..px(width, 36)).contains(&y)
+                        && (px(width, 29)..px(width, 29) + px(width, 29)).contains(&y)
                 });
                 assert!(field.is_some(), "handwriting escaped its field at {width}px: ({x}, {y})");
                 changed[field.unwrap()] += 1;
             }
             assert!(changed.iter().all(|count| *count > 0), "all three fields render at {width}px");
-            let mut long = blank(width);
-            header(&mut long, &Fields { date: "Été\n".repeat(100), subject: "À bientôt\t".repeat(100), technical: "400 ISO / 50 mm\r".repeat(100) });
+            let mut long = blank(width, 0, None);
+            header(
+                &mut long,
+                &Fields { date: "Été\n".repeat(100), subject: "À bientôt\t".repeat(100), technical: "400 ISO / 50 mm\r".repeat(100) },
+                None,
+            );
             let top = px(width, 60) * width;
             assert_eq!(empty.data[top..], long.data[top..], "long notes stay clear of the film");
         }

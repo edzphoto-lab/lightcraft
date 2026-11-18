@@ -6,7 +6,7 @@ use std::sync::{
     mpsc::{Receiver, TryRecvError, channel},
 };
 
-use egui::{ColorImage, Rect, TextureHandle, TextureOptions, pos2, vec2};
+use egui::{Align2, Color32, ColorImage, Rect, Stroke, StrokeKind, TextureHandle, TextureOptions, pos2, vec2};
 use lightcraft_catalog::PhotoId;
 use lightcraft_engine::{LibrarySource, Session, contact_sheet::film};
 use lightcraft_raster::Rgba8;
@@ -27,15 +27,17 @@ struct Key {
     source: LibrarySource,
     revision: u64,
     ids: Vec<PhotoId>,
+    page: Option<film::Page>,
 }
 
 impl Key {
-    fn for_page(session: &Session, ids: &[PhotoId]) -> Self {
-        Self { library: session.library_generation(), source: session.source, revision: session.catalog.revision, ids: ids.to_vec() }
+    fn for_page(session: &Session, ids: &[PhotoId], page: Option<film::Page>) -> Self {
+        Self { library: session.library_generation(), source: session.source, revision: session.catalog.revision, ids: ids.to_vec(), page }
     }
 
     fn token(&self) -> Value {
-        json!([self.library, self.source, self.revision, self.ids])
+        let page = self.page.map(|page| (page.number, page.total));
+        json!([self.library, self.source, self.revision, self.ids, page])
     }
 }
 
@@ -65,10 +67,11 @@ impl State {
         self.pending.is_some()
     }
 
-    fn refresh(&mut self, ctx: &egui::Context, session: &mut Session, ids: &[PhotoId]) {
-        let key = Key::for_page(session, ids);
+    fn refresh(&mut self, ctx: &egui::Context, session: &mut Session, ids: &[PhotoId], page: Option<film::Page>) {
+        let key = Key::for_page(session, ids, page);
         if self.key.as_ref() != Some(&key) {
             self.pixels = None;
+            self.blank = None;
             self.error = None;
             self.drawn_fields = None;
             self.key = Some(key.clone());
@@ -105,8 +108,8 @@ impl State {
             self.error = Some(error);
         }
         if self.drawn_fields.as_ref() != Some(&self.fields) {
-            let mut image = self.pixels.as_ref().unwrap_or_else(|| self.blank.get_or_insert_with(film::blank_preview)).clone();
-            film::header(&mut image, &self.fields);
+            let mut image = self.pixels.as_ref().unwrap_or_else(|| self.blank.get_or_insert_with(|| film::blank_preview(ids.len(), page))).clone();
+            film::header(&mut image, &self.fields, page);
             let egui_image = ColorImage::from_rgba_unmultiplied([image.width, image.height], &image.as_bytes());
             if let Some(texture) = &mut self.texture {
                 texture.set(egui_image, TextureOptions::LINEAR);
@@ -118,7 +121,7 @@ impl State {
     }
 
     fn start(&mut self, ctx: &egui::Context, session: &mut Session, ids: &[PhotoId], key: Key) -> Result<(), String> {
-        let prepared = film::prepare(session, ids, false)?;
+        let prepared = film::prepare(session, ids, false, key.page)?;
         let cancel = Arc::new(AtomicBool::new(false));
         let flag = cancel.clone();
         let (send, result) = channel();
@@ -152,6 +155,10 @@ fn page_ids(ids: &[PhotoId], page: usize) -> &[PhotoId] {
     ids.chunks(film::CAPACITY).nth(page).unwrap_or_default()
 }
 
+fn page_number(page: usize, pages: usize) -> Option<film::Page> {
+    (pages > 1).then_some(film::Page { number: page + 1, total: pages })
+}
+
 pub(crate) fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     let album = (app.session.library_generation(), app.session.source);
     if app.film_sheet.album != Some(album) {
@@ -167,24 +174,13 @@ pub(crate) fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
         egui::Frame::NONE.inner_margin(egui::Margin::same(14)).show(ui, |ui| {
             ui.label(egui::RichText::new(tr("Film Contact Sheet")).font(style.semibold(15.0)));
             ui.add_space(8.0);
-            app.film_sheet.refresh(ui.ctx(), &mut app.session, page_ids(&ids, app.film_sheet.page));
+            let page = app.film_sheet.page;
+            app.film_sheet.refresh(ui.ctx(), &mut app.session, page_ids(&ids, page), page_number(page, pages));
             let width = ui.available_width().max(1.0);
             let (sheet, _) = ui.allocate_exact_size(vec2(width, width / film::ASPECT), egui::Sense::hover());
             paint(&app.film_sheet, ui, sheet);
             if pages > 1 {
-                ui.horizontal(|ui| {
-                    let page = app.film_sheet.page;
-                    if ui.add_enabled(page > 0, egui::Button::new("‹")).on_hover_text(tr("Previous sheet")).clicked() {
-                        app.film_sheet.page -= 1;
-                    }
-                    ui.label(format!("{} / {pages}", page + 1));
-                    if ui.add_enabled(page + 1 < pages, egui::Button::new("›")).on_hover_text(tr("Next sheet")).clicked() {
-                        app.film_sheet.page += 1;
-                    }
-                    if page != app.film_sheet.page {
-                        ui.ctx().request_repaint();
-                    }
-                });
+                navigation(app, ui, &ids, page, pages, width);
             }
             ui.add_space(10.0);
             let active = app.film_sheet.enlarged;
@@ -236,6 +232,93 @@ pub(crate) fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     });
 }
 
+fn navigation(app: &mut LightcraftApp, ui: &mut egui::Ui, ids: &[PhotoId], page: usize, pages: usize, width: f32) {
+    let mut next_page = page;
+    let style = Tokens::get(ui.ctx());
+    let gap = ui.spacing().item_spacing.x;
+    let button_width = 30.0;
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        let arrow = |ui: &mut egui::Ui, enabled, symbol, help, id| {
+            let response = ui.add_enabled(enabled, egui::Button::new(symbol).min_size(vec2(button_width, 24.0))).on_hover_text(tr(help));
+            crate::widgets::register(ui, id, response.rect);
+            crate::widgets::announce(&response, tr(help));
+            response.clicked()
+        };
+        if arrow(ui, page > 0, "‹", "Previous sheet", "button:filmSheetPrevious") {
+            next_page = page.saturating_sub(1);
+        }
+        let size = vec2((width - 2.0 * (button_width + gap)).max(1.0), 24.0);
+        ui.allocate_ui_with_layout(size, egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {
+            ui.label(crate::i18n::tr_format!("Sheet {number} of {total}", number = page + 1, total = pages));
+        });
+        if arrow(ui, page + 1 < pages, "›", "Next sheet", "button:filmSheetNext") {
+            next_page = page + 1;
+        }
+    });
+
+    // Show three nearby pages so albums of any length retain the same layout.
+    let first = page.saturating_sub(1).min(pages.saturating_sub(3));
+    let thumb_width = ((width - 2.0 * gap) / 3.0).max(1.0);
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        for index in first..(first + 3).min(pages) {
+            let number = film::Page { number: index + 1, total: pages };
+            let height = thumb_width / film::ASPECT;
+            let (slot, response) = ui.allocate_exact_size(vec2(thumb_width, height + 19.0), egui::Sense::click());
+            let sheet = Rect::from_min_size(slot.min, vec2(thumb_width, height)).shrink(3.0);
+            crate::widgets::register(ui, format!("button:filmSheetPage{}", number.number), slot);
+            let label = crate::i18n::tr_format!("Sheet {number} of {total}", number = number.number, total = number.total);
+            crate::widgets::announce_selected(&response, label, index == page);
+            if ui.is_rect_visible(slot) {
+                paint_thumbnail(app, ui, sheet, page_ids(ids, index));
+                if index == page || response.hovered() || response.has_focus() {
+                    let color = if index == page { style.text } else { style.text_dim };
+                    ui.painter().rect_stroke(sheet.expand(2.0), 3.0, Stroke::new(1.0, color), StrokeKind::Outside);
+                }
+                ui.painter().text(pos2(slot.center().x, slot.bottom() - 8.0), Align2::CENTER_CENTER, number.label(), style.font(11.0), style.text);
+            }
+            if response.clicked() {
+                next_page = index;
+            }
+        }
+    });
+    if page != next_page {
+        app.film_sheet.page = next_page;
+        ui.ctx().request_repaint();
+    }
+}
+
+fn paint_thumbnail(app: &mut LightcraftApp, ui: &egui::Ui, sheet: Rect, ids: &[PhotoId]) {
+    let painter = ui.painter();
+    painter.rect_filled(sheet, 2.0, Color32::from_rgb(239, 235, 223));
+    let scale = sheet.width() / 800.0;
+    for (row, strip) in ids.chunks(film::COLUMNS).enumerate() {
+        let y = sheet.top() + (60 + row * 116) as f32 * scale;
+        let band = Rect::from_min_size(pos2(sheet.left() + 27.0 * scale, y), vec2(746.0 * scale, 111.0 * scale));
+        painter.rect_filled(band, 0.5, Color32::from_rgb(57, 47, 39));
+        for (col, &id) in strip.iter().enumerate() {
+            super::grid::request_thumb(app, id, 64, super::grid::BACKGROUND_THUMB_PRIORITY);
+            let frame =
+                Rect::from_min_size(pos2(sheet.left() + (33 + col * 124) as f32 * scale, y + 14.0 * scale), vec2(116.0 * scale, 83.0 * scale));
+            painter.rect_filled(frame, 0.0, Color32::from_rgb(16, 14, 13));
+            let Some(texture) = app.renderer.thumb(id) else { continue };
+            let [w, h] = texture.size.map(|edge| edge as f32);
+            let turned = h > w;
+            let size = if turned { vec2(h, w) } else { vec2(w, h) };
+            let fit = (frame.width() / size.x.max(1.0)).min(frame.height() / size.y.max(1.0));
+            let rect = Rect::from_center_size(frame.center(), vec2(w, h) * fit);
+            let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+            let mut mesh = egui::Mesh::with_texture(texture.tex.id());
+            mesh.add_rect_with_uv(rect, uv, Color32::WHITE);
+            if turned {
+                mesh.rotate(egui::emath::Rot2::from_angle(-std::f32::consts::FRAC_PI_2), frame.center());
+            }
+            painter.add(egui::Shape::mesh(mesh));
+        }
+    }
+}
+
 pub(crate) fn paint(state: &State, ui: &egui::Ui, area: Rect) {
     let Some(texture) = &state.texture else { return };
     let width = area.width().min(area.height() * film::ASPECT).max(0.0);
@@ -245,12 +328,15 @@ pub(crate) fn paint(state: &State, ui: &egui::Ui, area: Rect) {
 
 pub(crate) fn export(app: &mut LightcraftApp, params: &Value) -> Result<Value, String> {
     let ids = selected(&mut app.session);
-    let page = app.film_sheet.page;
+    let pages = ids.len().div_ceil(film::CAPACITY).max(1);
+    let album = (app.session.library_generation(), app.session.source);
+    let page = if app.film_sheet.album == Some(album) { app.film_sheet.page.min(pages - 1) } else { 0 };
+    let number = page_number(page, pages);
     let frames = page_ids(&ids, page);
     if frames.is_empty() {
         return Err(tr("Select photos in an album.").into());
     }
-    let current = Key::for_page(&app.session, frames).token();
+    let current = Key::for_page(&app.session, frames, number).token();
     let path = match params.get("path").and_then(Value::as_str) {
         Some(path) if !path.trim().is_empty() => {
             if params.get("selection").is_some_and(|selection| *selection != current) {
@@ -276,7 +362,7 @@ pub(crate) fn export(app: &mut LightcraftApp, params: &Value) -> Result<Value, S
                 _ => "",
             };
             let name: String = album.chars().filter(|c| !c.is_control() && !"/\\:".contains(*c)).take(80).collect();
-            let name = if ids.len() > film::CAPACITY {
+            let name = if pages > 1 {
                 format!("Planche-contact-{name}-{:02}.jpg", page + 1)
             } else if name.is_empty() {
                 "Planche-contact.jpg".into()
@@ -290,8 +376,8 @@ pub(crate) fn export(app: &mut LightcraftApp, params: &Value) -> Result<Value, S
             };
         }
     };
-    let prepared = film::prepare(&mut app.session, frames, true)?;
-    let fields = app.film_sheet.fields.clone();
+    let prepared = film::prepare(&mut app.session, frames, true, number)?;
+    let fields = if app.film_sheet.album == Some(album) { app.film_sheet.fields.clone() } else { film::Fields::default() };
     crate::export_task::start_sheet(app, path, frames.len(), move |progress| prepared.jpeg(&fields, progress))
 }
 
@@ -329,10 +415,47 @@ mod tests {
     }
 
     #[test]
-    fn extra_selected_frames_start_another_sheet() {
-        let photos: Vec<_> = (1..=39).map(PhotoId).collect();
-        assert_eq!(page_ids(&photos, 0).len(), 36);
-        assert_eq!(page_ids(&photos, 1), &[PhotoId(37), PhotoId(38), PhotoId(39)]);
-        assert!(page_ids(&photos, 2).is_empty());
+    fn navigates_three_sheets_and_resets_after_the_selection_shrinks() {
+        let library = crate::tests::fixtures::SyntheticLibrary::with_photos("film-sheet-pages", 75);
+        let mut app = library.app();
+        let ids: Vec<_> = app.session.catalog.photos().map(|photo| photo.id.0).collect();
+        app.run("library.select", json!({"ids": &ids})).unwrap();
+        let album = app.run("album.create", json!({"name": "Film", "addSelected": true})).unwrap()["id"].as_u64().unwrap();
+        app.run("library.source", json!({"kind": "album", "id": album})).unwrap();
+        app.run("library.select", json!({"ids": &ids})).unwrap();
+        app.run("panel.filmSheet", json!({})).unwrap();
+        let mut app = crate::headless::Headless::new(app, [1360.0, 900.0], 1.0);
+        let timeout = std::time::Duration::from_secs(40);
+        assert!(app.settle(timeout));
+        let all = selected(&mut app.app.session);
+        let check_page = |app: &crate::headless::Headless, page, len| {
+            let key = app.app.film_sheet.key.as_ref().unwrap();
+            assert_eq!(key.page, Some(film::Page { number: page + 1, total: 3 }));
+            assert_eq!(key.ids, page_ids(&all, page));
+            assert_eq!(key.ids.len(), len);
+            assert!(app.app.film_sheet.pixels.is_some(), "{:?}", app.app.film_sheet.error);
+        };
+        let click = |app: &mut crate::headless::Headless, id| {
+            let result = app.request("ui.clickWidget", json!({"id": id}), timeout);
+            assert_eq!(result["ok"], true, "{result}");
+            assert!(app.settle(timeout));
+        };
+        check_page(&app, 0, 36);
+        click(&mut app, "button:filmSheetNext");
+        check_page(&app, 1, 36);
+        let stale = app.app.film_sheet.key.as_ref().unwrap().token();
+        click(&mut app, "button:filmSheetPage3");
+        check_page(&app, 2, 3);
+        assert!(export(&mut app.app, &json!({"path": "Sheet.jpg", "selection": stale})).is_err());
+        click(&mut app, "button:filmSheetPrevious");
+        check_page(&app, 1, 36);
+
+        app.app.run("library.select", json!({"ids": &ids[..36]})).unwrap();
+        assert!(app.settle(timeout));
+        let key = app.app.film_sheet.key.as_ref().unwrap();
+        assert_eq!(app.app.film_sheet.page, 0);
+        assert_eq!(key.page, None);
+        assert_eq!(key.ids.len(), 36);
+        assert!(!app.app.widgets.iter().any(|(id, _)| id == "button:filmSheetNext"));
     }
 }

@@ -25,16 +25,16 @@ impl SyntheticLibrary {
         SyntheticLibrary::with_photos(tag, 1)
     }
 
-    /// A fresh folder for `tag`, with `n` distinct 64×48 gradient PNGs (`a.png`, `b.png`, …).
+    /// A fresh folder for `tag`, with `n` distinct 64×48 gradient PNGs.
     pub(crate) fn with_photos(tag: &str, n: usize) -> SyntheticLibrary {
-        assert!((1..=26).contains(&n), "fixture photo names use a through z");
+        assert!(n > 0);
         let dir = std::env::temp_dir().join(format!("lc-ui-fixture-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let (w, h) = (64usize, 48usize);
         let mut photos = Vec::new();
         for i in 0..n {
-            let name = format!("{}.png", char::from(b'a' + i as u8));
+            let name = if i < 26 { format!("{}.png", char::from(b'a' + i as u8)) } else { format!("photo-{i}.png") };
             let data: Vec<[u8; 4]> = (0..w * h)
                 .map(|p| {
                     let (x, y) = (p % w, p / w);

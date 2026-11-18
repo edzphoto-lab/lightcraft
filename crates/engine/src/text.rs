@@ -184,6 +184,11 @@ impl TextLayout {
         Some(TextLayout { fonts, glyphs, width, height })
     }
 
+    /// Baseline of the first glyph in a horizontal layout, relative to its origin.
+    pub(crate) fn first_baseline(&self) -> f32 {
+        self.glyphs.first().map_or(0.0, |(_, glyph, _)| glyph.position.y)
+    }
+
     /// Call `f(x, y, coverage)` for every pixel the text covers with its top-left corner at
     /// (`ox`, `oy`); coordinates may be negative or past the image (the caller clips).
     pub fn draw(&self, ox: f32, oy: f32, f: impl FnMut(i32, i32, f32)) {

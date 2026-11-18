@@ -1,4 +1,5 @@
 {
+  "Sheet {number} of {total}": "Planche {number} sur {total}",
   " ({unsure} with several look-alike files: use Locate)": " ({unsure} avec plusieurs fichiers similaires : utilisez Localiser)",
   " ({} in Recently Deleted)": " ({} dans « Supprimés récemment »)",
   " · {:.0}% clipped": " · {:.0}% écrêté",
