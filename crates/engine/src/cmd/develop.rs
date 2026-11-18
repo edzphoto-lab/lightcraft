@@ -963,25 +963,63 @@ pub fn specs() -> Vec<CommandSpec> {
             "Sync Settings",
             [],
             None,
-            "{groups?} — copy the active photo's settings to all selected photos",
+            "{groups?, mode?: development | crop} — copy the active photo's settings to the other selected photos",
             has_selection,
             |s, p| {
                 let c = "develop.sync";
                 let id = active(s, c)?;
-                let groups = groups_param(p, c)?.unwrap_or_else(SettingsGroup::default_copy);
-                let d = s.develop_of(id).unwrap_or_default();
-                let partial = lightcraft_develop::extract_groups(&d, &groups);
+                let groups = groups_param(p, c)?;
+                let source = s.catalog.photo(id).ok_or_else(|| bad(c, "no active photo"))?;
+                let d = &*source.develop;
+                enum Sync {
+                    Groups(Value),
+                    Development,
+                    Crop,
+                }
+                let mode = match p.get("mode") {
+                    None | Some(Value::Null) => {
+                        Sync::Groups(lightcraft_develop::extract_groups(d, &groups.unwrap_or_else(SettingsGroup::default_copy)))
+                    }
+                    Some(Value::String(mode)) if mode == "development" && groups.is_none() => Sync::Development,
+                    Some(Value::String(mode)) if mode == "crop" && groups.is_none() => Sync::Crop,
+                    _ => return Err(bad(c, "mode must be development or crop and cannot be combined with groups")),
+                };
+                let sync_groups = matches!(mode, Sync::Groups(_));
+                if !sync_groups && (source.deleted || source.is_video()) {
+                    return Err(bad(c, "the active item must be a photo"));
+                }
+                let label = match &mode {
+                    Sync::Development => "Synchronize Development",
+                    Sync::Crop => "Synchronize Crop",
+                    Sync::Groups(_) => "Sync Settings",
+                };
                 let ops = s
                     .selection
                     .ids
-                    .clone()
-                    .into_iter()
-                    .filter(|x| *x != id)
-                    .filter_map(|x| s.develop_of(x).map(|d| (x, d)))
-                    .filter_map(|(x, dd)| s.develop_op(x, lightcraft_develop::apply_partial(&dd, &partial, 1.0), "Sync Settings"))
+                    .iter()
+                    .copied()
+                    .filter(|&target| target != id)
+                    .filter_map(|target| {
+                        let photo = s.catalog.photo(target)?;
+                        if !sync_groups && (photo.deleted || photo.is_video()) {
+                            return None;
+                        }
+                        let current = &*photo.develop;
+                        let settings = match &mode {
+                            Sync::Development => DevelopSettings { crop: current.crop, orientation: current.orientation, ..d.clone() },
+                            Sync::Crop => DevelopSettings { crop: d.crop, orientation: d.orientation, ..current.clone() },
+                            Sync::Groups(partial) => lightcraft_develop::apply_partial(current, partial, 1.0),
+                        };
+                        if !sync_groups && settings == *current {
+                            return None;
+                        }
+                        s.develop_op(target, settings, label)
+                    })
                     .collect::<Vec<_>>();
                 let n = ops.len();
-                s.commit("Sync Settings", Op::Batch { ops })?;
+                if sync_groups || n > 0 {
+                    s.commit(label, Op::Batch { ops })?;
+                }
                 Ok(json!({"changed": n}))
             }
         ),

@@ -17,6 +17,50 @@ fn demo(size: [f32; 2], ui: serde_json::Value) -> Headless {
     h
 }
 
+#[test]
+fn bottom_bar_synchronizes_development_and_crop_separately() {
+    let mut h = demo([1400.0, 1000.0], json!({"view": "detail", "right": "edit"}));
+    let ids = h.app.session.visible().to_vec();
+    let [target, source, other_target, outside]: [_; 4] = ids[..4].try_into().unwrap();
+    for (id, exposure, bounds) in
+        [(source, 1.5, [0.1, 0.15, 0.9, 0.85]), (target, -0.5, [0.2, 0.2, 0.7, 0.7]), (other_target, -1.0, [0.3, 0.1, 0.8, 0.8])]
+    {
+        h.app.run("library.select", json!({"ids": [id.0]})).unwrap();
+        h.app.run("develop.set", json!({"values": {"light.exposure": exposure}})).unwrap();
+        h.app.run("crop.set", json!({"rect": bounds})).unwrap();
+    }
+    let settings = |h: &Headless, id| h.app.session.develop_of(id).unwrap();
+    let original_source = settings(&h, source);
+    let original_target = settings(&h, target);
+    let original_other_target = settings(&h, other_target);
+    let original_outside = settings(&h, outside);
+    h.app.run("library.select", json!({"ids": [target.0, source.0, other_target.0], "active": source.0})).unwrap();
+    h.step();
+    let development = h.request("ui.clickWidget", json!({"id": "icon:syncDevelopment"}), T);
+    assert_eq!(development["ok"], true, "{development}");
+    h.step();
+    for (id, original) in [(target, &original_target), (other_target, &original_other_target)] {
+        assert_eq!(settings(&h, id).light, original_source.light);
+        assert_eq!(settings(&h, id).crop, original.crop);
+    }
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(settings(&h, target), original_target);
+    assert_eq!(settings(&h, other_target), original_other_target);
+
+    let crop = h.request("ui.clickWidget", json!({"id": "icon:syncCrop"}), T);
+    assert_eq!(crop["ok"], true, "{crop}");
+    h.step();
+    for (id, original) in [(target, &original_target), (other_target, &original_other_target)] {
+        assert_eq!(settings(&h, id).crop, original_source.crop);
+        assert_eq!(settings(&h, id).light, original.light);
+    }
+    assert_eq!(settings(&h, source), original_source);
+    assert_eq!(settings(&h, outside), original_outside);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(settings(&h, target), original_target);
+    assert_eq!(settings(&h, other_target), original_other_target);
+}
+
 /// Application dialogs block the toolbar, including the gear that would reopen Copy Settings
 /// and discard its choices. Their own controls work, and closing restores background input.
 #[test]
