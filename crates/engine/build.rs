@@ -78,7 +78,7 @@ fn craft_fonts(dir: &Path, required: bool) -> Result<String, String> {
         has_japanese_ui |= (*family, *style) == ("BIZ UDPGothic", "Regular");
         has_chinese_ui |= (*family, *style) == ("Noto Sans CJK SC", "Regular") && scripts.split(',').any(|script| script.trim() == "Hans");
         has_thai_ui |= (*family, *style) == ("Noto Sans Thai", "Regular") && scripts.split(',').any(|script| script.trim() == "Thai");
-        if wasm && !matches!((*family, *style), ("BIZ UDPGothic" | "Noto Sans Thai" | "Noto Sans Georgian", "Regular")) {
+        if wasm && !matches!((*family, *style), ("BIZ UDPGothic" | "Noto Sans Thai" | "Noto Sans Georgian", "Regular") | ("Kalam", "Bold")) {
             continue;
         }
         let path = dir.join(file).canonicalize().map_err(|e| format!("{file}: {e}"))?;

@@ -21,6 +21,12 @@ const INK: [u8; 3] = [38, 33, 28];
 const EDGE_INK: [u8; 3] = [245, 234, 213];
 const EDGE_INK_OPAQUE: [u8; 4] = [245, 234, 213, 255];
 
+enum Lettering {
+    Label,
+    FilmEdge,
+    Handwritten,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Fields {
     pub date: String,
@@ -124,12 +130,12 @@ fn blank(width: usize) -> Rgba8 {
         }
         let number = (slot + 1).to_string();
         for ny in [y - px(width, 15), y + h + px(width, 2)] {
-            text(&mut image, &number, x + px(width, 69), ny, px(width, 29), px(width, 12), EDGE_INK);
+            text(&mut image, &number, x + px(width, 69), ny, px(width, 29), px(width, 12), Lettering::FilmEdge);
         }
         if slot > 0 {
             let baseline = y + h + px(width, 10);
             edge_arrow(&mut image, x + px(width, 1), baseline, width);
-            text(&mut image, &format!("{slot}A"), x + px(width, 12), y + h + px(width, 6), px(width, 27), px(width, 8), EDGE_INK);
+            text(&mut image, &format!("{slot}A"), x + px(width, 12), y + h + px(width, 6), px(width, 27), px(width, 8), Lettering::FilmEdge);
         }
     }
     image
@@ -140,13 +146,13 @@ pub fn header(image: &mut Rgba8, fields: &Fields) {
     for (label, input, x, line, end) in
         [("DATE", &fields.date, 42, 81, 211), ("SUBJECT", &fields.subject, 246, 308, 470), ("TECHNICAL DATA", &fields.technical, 505, 626, 758)]
     {
-        text(image, label, px(w, x), px(w, 21), px(w, line - x), px(w, 17), INK);
+        text(image, label, px(w, x), px(w, 21), px(w, line - x), px(w, 17), Lettering::Label);
         let line_w = px(w, end - line);
         let line_x = px(w, line);
         fill(image, line_x, px(w, 36), line_w, px(w, 1), [83, 75, 65, 255]);
         let line_text: String = input.chars().filter(|c| !c.is_control()).take(256).collect();
         if !line_text.is_empty() {
-            text(image, &line_text, line_x + px(w, 3), px(w, 20), line_w - px(w, 6), px(w, 16), INK);
+            text(image, &line_text, line_x + px(w, 3), px(w, 15), line_w - px(w, 6), px(w, 21), Lettering::Handwritten);
         }
     }
 }
@@ -165,11 +171,21 @@ fn edge_arrow(image: &mut Rgba8, x: usize, center: usize, width: usize) {
     fill(image, x, center - radius, stroke, radius * 2 + stroke, EDGE_INK_OPAQUE);
 }
 
-fn text(image: &mut Rgba8, value: &str, x: usize, y: usize, w: usize, h: usize, color: [u8; 3]) {
+fn text(image: &mut Rgba8, value: &str, x: usize, y: usize, w: usize, h: usize, lettering: Lettering) {
+    let primary = match lettering {
+        Lettering::Handwritten => {
+            crate::CRAFT_FONTS.iter().find(|font| font.family == "Kalam" && font.style == "Bold").map_or(crate::text::TEXT_FONT, |font| font.bytes)
+        }
+        _ => crate::text::TEXT_FONT,
+    };
+    let color = match lettering {
+        Lettering::FilmEdge => EDGE_INK,
+        _ => INK,
+    };
     let font = h as f32 * 0.91;
-    let Some(layout) = TextLayout::new(value, font, false, crate::CRAFT_FONTS) else { return };
+    let Some(layout) = TextLayout::with_primary(value, font, primary, crate::CRAFT_FONTS) else { return };
     let size = font * (w as f32 / layout.width.max(1.0)).min(1.0);
-    let Some(layout) = TextLayout::new(value, size, false, crate::CRAFT_FONTS) else { return };
+    let Some(layout) = TextLayout::with_primary(value, size, primary, crate::CRAFT_FONTS) else { return };
     let origin_y = y as f32 + h as f32 - layout.height;
     layout.draw_in(x as f32, origin_y, (x + w) as f32, (y + h) as f32, |gx, gy, coverage| {
         let (Ok(gx), Ok(gy)) = (usize::try_from(gx), usize::try_from(gy)) else { return };
@@ -249,5 +265,35 @@ mod tests {
         assert_ne!(before.data[..strips], sheet.data[..strips]);
         assert_eq!(before.data[strips..], sheet.data[strips..]);
         assert_eq!(px(EXPORT_WIDTH, 790), 3792);
+    }
+
+    #[test]
+    fn handwritten_fields_fit_their_lines_in_preview_and_export() {
+        let fields = Fields { date: "18.11.2026".into(), subject: "Portraits - Jen".into(), technical: "Tri-X 400 / 50 mm".into() };
+        for width in [PREVIEW_WIDTH, EXPORT_WIDTH] {
+            let mut empty = blank(width);
+            header(&mut empty, &Fields::default());
+            let mut filled = blank(width);
+            header(&mut filled, &fields);
+            let bounds = [(81, 211), (308, 470), (626, 758)];
+            let mut changed = [0; 3];
+            for (index, (before, after)) in empty.data.iter().zip(&filled.data).enumerate() {
+                if before == after {
+                    continue;
+                }
+                let (x, y) = (index % width, index / width);
+                let field = bounds.iter().position(|&(start, end)| {
+                    (px(width, start) + px(width, 3)..px(width, start) + px(width, end - start) - px(width, 3)).contains(&x)
+                        && (px(width, 15)..px(width, 36)).contains(&y)
+                });
+                assert!(field.is_some(), "handwriting escaped its field at {width}px: ({x}, {y})");
+                changed[field.unwrap()] += 1;
+            }
+            assert!(changed.iter().all(|count| *count > 0), "all three fields render at {width}px");
+            let mut long = blank(width);
+            header(&mut long, &Fields { date: "Été\n".repeat(100), subject: "À bientôt\t".repeat(100), technical: "400 ISO / 50 mm\r".repeat(100) });
+            let top = px(width, 60) * width;
+            assert_eq!(empty.data[top..], long.data[top..], "long notes stay clear of the film");
+        }
     }
 }

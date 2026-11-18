@@ -71,6 +71,17 @@ impl TextLayout {
     /// `text` (cut at [`MAX_CHARS`]) at `px` pixels a line; `None` when there is nothing to draw
     /// (empty text, a non-finite or non-positive size).
     pub fn new(text: &str, px: f32, vertical: bool, craft: &'static [crate::fonts::CraftFont]) -> Option<TextLayout> {
+        Self::with_faces(text, px, vertical, faces(craft))
+    }
+
+    /// Horizontal text in a specific face, with the usual fonts covering missing glyphs.
+    pub fn with_primary(text: &str, px: f32, primary: &'static [u8], craft: &'static [crate::fonts::CraftFont]) -> Option<TextLayout> {
+        let primary = FontRef::try_from_slice(primary).ok()?;
+        let fonts = std::iter::once(primary).chain(faces(craft)).collect();
+        Self::with_faces(text, px, false, fonts)
+    }
+
+    fn with_faces(text: &str, px: f32, vertical: bool, fonts: Vec<FontRef<'static>>) -> Option<TextLayout> {
         use unicode_segmentation::UnicodeSegmentation;
         if text.is_empty() || !px.is_finite() || px <= 0.0 {
             return None;
@@ -79,7 +90,6 @@ impl TextLayout {
             Some((i, _)) => text.get(..i).unwrap_or(text),
             None => text,
         };
-        let fonts = faces(craft);
         let latin = fonts.first()?.clone();
         let vertical_data: Vec<_> = if vertical {
             fonts.iter().map(|font| harfrust::FontRef::new(font.font_data()).ok().map(|face| harfrust::ShaperData::new(&face))).collect()
@@ -232,6 +242,31 @@ impl TextLayout {
 mod tests {
     use super::*;
     use crate::fonts::{CRAFT_FONTS, CraftFont};
+
+    #[test]
+    fn handwritten_text_uses_kalam_with_accents_and_keeps_missing_glyph_fallbacks() {
+        let Some(font) = CRAFT_FONTS.iter().find(|font| font.family == "Kalam" && font.style == "Bold") else {
+            lightcraft_testkit::skip!(Fonts, "built without the contact sheet's Kalam Bold font");
+            return;
+        };
+        let text = "Séance à Noël — Élodie 400 ISO / 50 mm";
+        let layout = TextLayout::with_primary(text, 40.0, font.bytes, CRAFT_FONTS).unwrap();
+        assert_eq!(layout.glyphs.len(), text.chars().count());
+        assert!(layout.glyphs.iter().all(|(face, glyph, _)| *face == 0 && glyph.id.0 != 0));
+        assert_eq!(layout.fonts[0].font_data(), font.bytes);
+        let pixels = |layout: &TextLayout| {
+            let mut out = Vec::new();
+            layout.draw(0.0, 0.0, |x, y, coverage| out.push((x, y, coverage)));
+            out
+        };
+        let printed = TextLayout::new(text, 40.0, false, CRAFT_FONTS).unwrap();
+        assert!(!pixels(&layout).is_empty());
+        assert_ne!(pixels(&layout), pixels(&printed));
+        let mixed = TextLayout::with_primary("Séance Ω", 40.0, font.bytes, CRAFT_FONTS).unwrap();
+        assert!(mixed.glyphs.iter().all(|(_, glyph, _)| glyph.id.0 != 0));
+        assert!(mixed.glyphs.iter().any(|(face, _, _)| *face > 0));
+        assert!(TextLayout::with_primary("text", 40.0, b"invalid font", CRAFT_FONTS).is_none());
+    }
 
     fn assert_script_glyphs(script: &str, text: &str) {
         if !CRAFT_FONTS.iter().any(|font| font.covers(script)) {
