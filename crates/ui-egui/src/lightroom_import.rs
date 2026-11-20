@@ -290,7 +290,10 @@ fn terminal(app: &mut LightcraftApp, ctx: &egui::Context, task: &LightroomTask, 
         let imported = report["imported"].as_u64().unwrap_or(0);
         let failed = report["failed"].as_array().map_or(0, Vec::len);
         let warning = value.get("indexWarning").and_then(Value::as_str);
-        if let Some(warning) = warning {
+        if report["labelsOnly"] == true {
+            let updated = report["updated"].as_u64().unwrap_or(0);
+            crate::i18n::tr_format!("Lightroom color labels recovered on {updated} photos", updated = updated)
+        } else if let Some(warning) = warning {
             crate::i18n::tr_format!(
                 "Lightroom import complete: {imported} photos added; index warning: {warning}",
                 imported = imported,
@@ -323,6 +326,22 @@ fn show_result(app: &mut LightcraftApp) {
 fn result_dialog(value: &Value, summary: &str, catalog: &lightcraft_catalog::Catalog) -> crate::state::Dialog {
     let report = value.get("report").unwrap_or(value);
     let mut details = Vec::new();
+    if report["labelsOnly"] == true {
+        let kept = report["kept"].as_u64().unwrap_or(0);
+        let unmatched = report["unmatched"].as_u64().unwrap_or(0);
+        let conflicts = report["conflicts"].as_u64().unwrap_or(0);
+        details.push(crate::i18n::tr_format!(
+            "{kept} existing labels kept. {unmatched} labeled Lightroom photos unmatched. {conflicts} conflicting matches.",
+            kept = kept,
+            unmatched = unmatched,
+            conflicts = conflicts
+        ));
+        if let Some(unknown) = report["unknownLabels"].as_object().filter(|names| !names.is_empty()) {
+            let labels = unknown.iter().take(8).map(|(name, count)| format!("{name} ({count})")).collect::<Vec<_>>().join(", ");
+            details.push(crate::i18n::tr_format!("Unrecognized Lightroom labels: {labels}", labels = labels));
+            details.push(crate::i18n::tr("Match custom labels by editing Color Label Names and try again.").into());
+        }
+    }
     if let Some(photos) = report["photos"].as_u64() {
         details.push(crate::i18n::tr_format!(
             "{photos} catalog records processed; {collections} collections.",
@@ -392,9 +411,15 @@ fn start_inspect(app: &mut LightcraftApp, path: PathBuf, ctx: &egui::Context) ->
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn start_import(app: &mut LightcraftApp, path: PathBuf, update_existing: bool, ctx: &egui::Context) -> Result<Value, String> {
+fn start_import(app: &mut LightcraftApp, path: PathBuf, params: &Value, labels_only: bool, ctx: &egui::Context) -> Result<Value, String> {
     busy(app)?;
-    let job = lightcraft_engine::lightroom_job::LightroomJob::new(&mut app.session, path.clone(), update_existing).map_err(|e| e.to_string())?;
+    use lightcraft_engine::lightroom_job::LightroomJob;
+    let job = if labels_only {
+        LightroomJob::for_labels(&mut app.session, path.clone())
+    } else {
+        LightroomJob::new(&mut app.session, path.clone(), params.get("updateExisting").and_then(Value::as_bool).unwrap_or(false))
+    }
+    .map_err(|e| e.to_string())?;
     let cancel = Arc::new(AtomicBool::new(false));
     let progress = job.progress();
     let (tx, rx) = mpsc::channel();
@@ -431,7 +456,7 @@ pub fn command(app: &mut LightcraftApp, id: &str, p: &Value, ctx: &egui::Context
         let result = if id == "library.inspectLightroom" {
             start_inspect(app, path, ctx)
         } else {
-            start_import(app, path, p.get("updateExisting").and_then(Value::as_bool).unwrap_or(false), ctx)
+            start_import(app, path, p, id == "library.recoverLightroomLabels", ctx)
         }?;
         if wait {
             return wait_for(app, ctx, std::time::Duration::from_secs(600));

@@ -77,6 +77,7 @@ pub struct PreparedLightroom {
     pub(crate) token: LightroomLibraryToken,
     pub(crate) missing_sources: HashSet<String>,
     pub(crate) update_existing: bool,
+    labels_only: bool,
     pub(crate) now: String,
     cancelled: bool,
 }
@@ -198,6 +199,7 @@ impl LightroomProgress {
 pub struct LightroomJob {
     path: PathBuf,
     update_existing: bool,
+    labels_only: bool,
     import: ImportJob,
     token: LightroomLibraryToken,
     archive_dir: Option<PathBuf>,
@@ -218,7 +220,14 @@ impl LightroomJob {
             add_done: Arc::clone(&import.done),
             ..LightroomProgress::default()
         };
-        Ok(Self { path, update_existing, import, token: LightroomLibraryToken::capture(s), archive_dir, progress })
+        Ok(Self { path, update_existing, labels_only: false, import, token: LightroomLibraryToken::capture(s), archive_dir, progress })
+    }
+
+    /// Prepare a metadata-only recovery for photos already in the open library.
+    pub fn for_labels(s: &mut crate::Session, path: PathBuf) -> crate::Result<Self> {
+        let mut job = Self::new(s, path, false)?;
+        job.labels_only = true;
+        Ok(job)
     }
 
     /// The job's progress, to watch from another thread while [`LightroomJob::prepare`] runs.
@@ -241,11 +250,29 @@ impl LightroomJob {
             return Err(cancelled());
         }
         // (reading stops with a message when `cancel` is set: the flag says it was cancelled)
-        let mut data = lightroom_catalog::read_with_progress(&self.path, cancel, &self.progress.catalog_total, &self.progress.catalog_done)
-            .map_err(|e| if cancel.load(Ordering::Relaxed) { cancelled() } else { error(e) })?;
+        let mut data =
+            lightroom_catalog::read_catalog(&self.path, cancel, &self.progress.catalog_total, &self.progress.catalog_done, self.labels_only)
+                .map_err(|e| if cancel.load(Ordering::Relaxed) { cancelled() } else { error(e) })?;
         lightroom_catalog::validate_for_job(&data).map_err(error)?;
         if cancel.load(Ordering::Relaxed) {
             return Err(cancelled());
+        }
+        if self.labels_only {
+            let index_path = self.archive_dir.as_ref().map(|dir| dir.join("lightroom-index.json"));
+            let index = lightroom_catalog::load_index(index_path.as_deref())?;
+            self.progress.catalog_done.fetch_add(1, Ordering::Relaxed);
+            return Ok(PreparedLightroom {
+                data,
+                normal: Prepared::default(),
+                index,
+                archive_path: None,
+                token: self.token.clone(),
+                missing_sources: HashSet::new(),
+                update_existing: false,
+                labels_only: true,
+                now: self.import.now().to_string(),
+                cancelled: cancel.load(Ordering::Relaxed),
+            });
         }
         let (paths, missing_sources) = original_paths(&data, cancel)?;
         // Catalog entries name files, never folders. Missing originals already have enough
@@ -270,6 +297,7 @@ impl LightroomJob {
             token: self.token.clone(),
             missing_sources,
             update_existing: self.update_existing,
+            labels_only: false,
             now: self.import.now().to_string(),
             cancelled: cancel.load(Ordering::Relaxed),
         })
@@ -290,6 +318,11 @@ pub fn commit_prepared(s: &mut crate::Session, mut prepared: PreparedLightroom) 
     // callers do not set this transient flag, so they cannot affect a later command.
     if s.depth > 0 {
         s.skip_auto_write = true;
+    }
+
+    if prepared.labels_only {
+        let report = lightroom_catalog::apply_labels(s, &prepared.data, &prepared.index)?;
+        return Ok(LightroomCompletion { report, finalization: LightroomArchiveFinalization { path: None, bytes: None } });
     }
 
     let undo0 = s.undo.len();
@@ -368,6 +401,7 @@ mod tests {
             token: LightroomLibraryToken::capture(s),
             missing_sources: HashSet::new(),
             update_existing: false,
+            labels_only: false,
             now: "2026-01-01T00:00:00".into(),
             cancelled: true,
         }
@@ -408,6 +442,7 @@ mod tests {
             token: LightroomLibraryToken::capture(s),
             missing_sources: [normalize(path)].into_iter().collect(),
             update_existing: false,
+            labels_only: false,
             now: "2026-01-01T00:00:00".into(),
             cancelled: false,
         }
@@ -550,6 +585,7 @@ mod tests {
             token,
             missing_sources: HashSet::new(),
             update_existing: false,
+            labels_only: false,
             now: "2026-01-01T00:00:00".into(),
             cancelled: false,
         };

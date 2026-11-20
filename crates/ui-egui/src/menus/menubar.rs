@@ -131,6 +131,8 @@ const LAYOUT: &[(&str, &[&str])] = &[
             "file.addPhotos",
             "file.addFolder",
             "@Import from Device",
+            "file.importLightroom",
+            "file.recoverLightroomLabels",
             "---",
             "app.newLibrary",
             "app.openLibrary",

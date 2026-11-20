@@ -160,3 +160,15 @@ Linux) is not looked at either and stays catalogued as missing.
 ## Historical local validation
 
 Validated in a local Linux environment after upstream reconciliation: 47 catalog-focused tests, nine pipeline spot tests, the exact sparse-catalog regression, and all eight `cargo xtask ci` stages passed. The full gate recorded 3,166 passing test executions, zero failures, and 28 ignored tests. An original synthetic sparse catalog with a required image-table page beyond 1 GiB also passed headless application import and selection; its expected missing-original placeholder retained its five-star rating. This snapshot check does not establish native-window coverage or dense-catalog performance.
+
+## Recover color labels in an existing library
+
+In LightCraft EdZ Lab choose **File → Recover Lightroom Color Labels…**
+and select the Lightroom Classic `.lrcat`. The command reads the catalog and
+matches existing photos by recorded import identity or a unique original path.
+Standard English and French color names are recognized. For custom names,
+configure the corresponding LightCraft Color Label Names once and run recovery again.
+
+Recovery fills missing labels in a single undoable step. Existing labels, edits
+and albums are preserved. The result reports unmatched photos and unrecognized
+names. The Lightroom catalog and photo files are opened read-only.

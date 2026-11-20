@@ -152,7 +152,7 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
     if matches!(id, "ui.dock" | "ui.dock.reset") {
         return Some(crate::docking::command(app, id == "ui.dock.reset", p));
     }
-    if matches!(id, "library.inspectLightroom" | "library.importLightroom") {
+    if matches!(id, "library.inspectLightroom" | "library.importLightroom" | "library.recoverLightroomLabels") {
         // the app's own context: a fresh one's repaints reach no window and its clock starts at zero
         let ctx = app.tasks.repaint.clone().unwrap_or_default();
         return Some(crate::lightroom_import::command(app, id, p, &ctx));
@@ -1360,31 +1360,32 @@ fn ui_commands_10(app: &mut LightcraftApp, ctx: &egui::Context, id: &str, p: &Va
             let r = crate::import::open(app, paths);
             import_into_album(app, p, r)
         }
-        "file.importLightroom" => {
-            // where the catalog goes (#2672): checked before a file dialog opens
-            let req = match crate::lightroom_destination::Request::parse(p) {
-                Ok(req) => req,
-                Err(e) => return Some(Err(e)),
-            };
-            let path = match p.get("path").and_then(Value::as_str).map(str::to_string) {
-                Some(path) => Some(path),
-                None => {
-                    let req =
-                        PickRequest::file(crate::i18n::tr("Import Lightroom Catalog"), crate::i18n::tr("Lightroom Classic Catalog"), &["lrcat"]);
-                    match crate::pick::ask(app, id, p, "path", req, |s| s.pick_lightroom_catalog.as_mut().and_then(|f| f()).map(|x| vec![x])) {
-                        Picked::Now(v) => v.into_iter().next(),
-                        Picked::Later | Picked::Unavailable => None,
-                    }
-                }
-            };
-            match path {
-                Some(path) => crate::lightroom_destination::import(app, &path, &req),
-                None => Ok(Value::Null),
-            }
-        }
+        "file.importLightroom" | "file.recoverLightroomLabels" => file_lightroom_command(app, id, p),
         _ => return None,
     };
     Some(r)
+}
+
+fn file_lightroom_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Result<Value, String> {
+    let recovery = id == "file.recoverLightroomLabels";
+    // Full imports may choose a new destination; recovery uses the open library.
+    let destination = if recovery { None } else { Some(crate::lightroom_destination::Request::parse(p)?) };
+    let path = match p.get("path").and_then(Value::as_str).map(str::to_string) {
+        Some(path) => Some(path),
+        None => {
+            let title = if recovery { "Recover Lightroom Color Labels" } else { "Import Lightroom Catalog" };
+            let req = PickRequest::file(crate::i18n::tr(title), crate::i18n::tr("Lightroom Classic Catalog"), &["lrcat"]);
+            match crate::pick::ask(app, id, p, "path", req, |s| s.pick_lightroom_catalog.as_mut().and_then(|f| f()).map(|x| vec![x])) {
+                Picked::Now(v) => v.into_iter().next(),
+                Picked::Later | Picked::Unavailable => None,
+            }
+        }
+    };
+    match (path, destination) {
+        (Some(path), Some(req)) => crate::lightroom_destination::import(app, &path, &req),
+        (Some(path), None) => app.run("library.recoverLightroomLabels", json!({"path": path})),
+        (None, _) => Ok(Value::Null),
+    }
 }
 
 /// Part 11 of 12 of the UI commands; `None` means the id is not one of this part's.

@@ -955,6 +955,79 @@ fn photo_tables(root: (&str, &str)) -> Vec<(&'static str, &'static str, Vec<SqlV
 }
 
 #[test]
+fn recovers_french_catalog_labels_in_bulk_without_changing_existing_photos_otherwise() {
+    use SqlValue::{Integer as I, Null as N, Text as T};
+    let dir = std::env::temp_dir().join(format!("lightcraft-lrcat-recover-labels-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("source.lrcat");
+    let mut tables = one_row(photo_tables((dir.to_str().unwrap(), "")));
+    let labels = [("first", " Violet "), ("second", "BLEU"), ("third", "Vert"), ("custom", "Pour le livre"), ("unmatched", "Jaune")];
+    tables[2].2 = labels.iter().map(|(name, _)| vec![N, I(1), T(format!("{name}.ARW"))]).collect();
+    tables[3] = (
+        "Adobe_images",
+        "id_local INTEGER PRIMARY KEY, id_global, rootFile, fileFormat, rating, pick, colorLabels",
+        labels
+            .iter()
+            .enumerate()
+            .map(|(i, (name, color))| vec![N, T((*name).into()), I(i as i64 + 1), T("ARW".into()), I(0), I(-1), T((*color).into())])
+            .collect(),
+    );
+    let bytes = native_catalog_rows(&tables, None);
+    std::fs::write(&path, &bytes).unwrap();
+    let data = read(&path).unwrap();
+    let mut s = crate::Session::new();
+    let ids: Vec<_> = data
+        .photos
+        .iter()
+        .take(4)
+        .map(|src| {
+            let id = s.catalog.alloc_photo_id();
+            let mut p = Photo::new(id, Source::File { path: src.path.clone() }, &src.uuid, "ARW", 20, 10, "before");
+            p.rating = 5;
+            p.flag = Flag::Pick;
+            if src.uuid == "third" {
+                p.label = Some(ColorLabel::Red);
+            }
+            s.commit("Existing photo", Op::AddPhoto { photo: Box::new(p) }).unwrap();
+            id
+        })
+        .collect();
+    let mut settings = lightcraft_develop::DevelopSettings::default();
+    settings.light.exposure = 0.8;
+    s.set_develop(ids[0], settings, "Existing edit").unwrap();
+    let before = s.catalog.to_snapshot();
+    let result = s.execute("library.recoverLightroomLabels", &json!({"path": path})).unwrap();
+    assert_eq!(result["updated"], 2);
+    assert_eq!(result["kept"], 1);
+    assert_eq!(result["unmatched"], 1);
+    assert_eq!(result["unknownLabels"], json!({"Pour le livre": 1}));
+    assert_eq!(s.catalog.len(), 4);
+    let photos: Vec<_> = ids.iter().map(|id| s.catalog.photo(*id).unwrap()).collect();
+    assert_eq!(photos.iter().map(|p| p.label).collect::<Vec<_>>(), [Some(ColorLabel::Purple), Some(ColorLabel::Blue), Some(ColorLabel::Red), None]);
+    assert!(photos.iter().all(|p| p.rating == 5 && p.flag == Flag::Pick));
+    assert_eq!(photos[0].develop.light.exposure, 0.8);
+    assert_eq!(s.execute("library.recoverLightroomLabels", &json!({"path": path})).unwrap()["updated"], 0);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.catalog.to_snapshot(), before);
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn full_catalog_import_recognizes_french_and_reads_xmp_when_catalog_label_is_missing() {
+    let mut data = sample();
+    let copy = data.photos.iter_mut().find(|p| p.source_id == 2).unwrap();
+    copy.image.insert("colorLabels".into(), json!("Bleu"));
+    let master = data.photos.iter_mut().find(|p| p.source_id == 1).unwrap();
+    master.xmp = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:Label="Jaune"/></rdf:RDF></x:xmpmeta>"#.into();
+    let mut s = crate::Session::new();
+    let result = apply(&mut s, data, false).unwrap();
+    let label = |src: &str| s.catalog.photo(PhotoId(result["mapping"][src].as_u64().unwrap())).unwrap().label;
+    assert_eq!(label("1"), Some(ColorLabel::Yellow));
+    assert_eq!(label("2"), Some(ColorLabel::Blue));
+}
+
+#[test]
 fn native_video_import_is_visible_in_video_filter() {
     let dir = std::env::temp_dir().join(format!("lightcraft-lrcat-video-filter-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

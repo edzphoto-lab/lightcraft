@@ -9,7 +9,7 @@ use std::sync::{
 };
 
 use crate::lightroom_sqlite::{Database, FileSource, LiveTable, Value as SqlValue};
-use lightcraft_catalog::{Album, Flag, Op, Photo, PhotoId, Source};
+use lightcraft_catalog::{Album, Catalog, ColorLabel, Flag, Op, Photo, PhotoId, Source};
 use lightcraft_geom::{Affine, Orientation, Point, Rect};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -249,6 +249,90 @@ fn identity(data: &CatalogImport, photo: &CatalogPhoto) -> String {
     if photo.uuid.is_empty() { format!("{}:{}", key(&data.source), photo.source_id) } else { photo.uuid.clone() }
 }
 
+fn label_text(photo: &CatalogPhoto) -> Option<std::borrow::Cow<'_, str>> {
+    photo.image.get("colorLabels").and_then(Value::as_str).map(std::borrow::Cow::Borrowed).or_else(|| {
+        if photo.xmp.is_empty() {
+            return None;
+        }
+        lightcraft_meta::parse_xmp(&photo.xmp).ok()?.metadata.label.map(std::borrow::Cow::Owned)
+    })
+}
+
+fn lightroom_label(catalog: &Catalog, name: &str) -> Option<ColorLabel> {
+    catalog.label_from_name(name).or_else(|| match name.trim().to_lowercase().as_str() {
+        "rouge" => Some(ColorLabel::Red),
+        "jaune" => Some(ColorLabel::Yellow),
+        "vert" => Some(ColorLabel::Green),
+        "bleu" => Some(ColorLabel::Blue),
+        "violet" | "pourpre" => Some(ColorLabel::Purple),
+        _ => None,
+    })
+}
+
+fn indexed_photo(catalog: &Catalog, data: &CatalogImport, src: &CatalogPhoto, index: &ImportIndex) -> Option<PhotoId> {
+    let id = PhotoId(*index.photos.get(&identity(data, src))?);
+    catalog.photo(id).filter(|p| source_path(p).is_some_and(|path| key(path) == key(&src.path))).map(|p| p.id)
+}
+
+/// Recover labels on existing photos only. Catalog UUIDs distinguish imported virtual copies;
+/// a unique original path also matches files that were added independently to LightCraft.
+pub(crate) fn apply_labels(s: &mut crate::Session, data: &CatalogImport, index: &ImportIndex) -> crate::Result<Value> {
+    let mut originals = HashMap::new();
+    for photo in s.catalog.photos().filter(|p| p.in_library() && p.copy_of.is_none()) {
+        if let Some(path) = source_path(photo) {
+            originals.entry(key(path)).and_modify(|id| *id = None).or_insert(Some(photo.id));
+        }
+    }
+    let mut unknown = BTreeMap::<String, usize>::new();
+    let mut unmatched = 0;
+    let mut matched = BTreeMap::new();
+    for src in &data.photos {
+        let Some(name) = label_text(src).filter(|name| !name.trim().is_empty()) else { continue };
+        if matches!(src.original, Original::Refused(_)) {
+            unmatched += 1;
+            continue;
+        }
+        let target = indexed_photo(&s.catalog, data, src, index)
+            .or_else(|| if number(&src.image, "masterImage") == 0 { originals.get(&key(&src.path)).copied().flatten() } else { None });
+        let Some(photo) = target.and_then(|id| s.catalog.photo(id)).filter(|p| p.in_library()) else {
+            unmatched += 1;
+            continue;
+        };
+        let Some(label) = lightroom_label(&s.catalog, &name) else {
+            *unknown.entry(name.trim().to_owned()).or_default() += 1;
+            continue;
+        };
+        matched
+            .entry(photo.id)
+            .and_modify(|previous| {
+                if *previous != Some(label) {
+                    *previous = None;
+                }
+            })
+            .or_insert(Some(label));
+    }
+    let mut changed = Vec::new();
+    let mut kept = 0;
+    let mut conflicts = 0;
+    for (id, proposed) in matched {
+        let Some(label) = proposed else {
+            conflicts += 1;
+            continue;
+        };
+        if s.catalog.photo(id).is_some_and(|p| p.label.is_some()) {
+            kept += 1;
+        } else {
+            changed.push(Op::SetLabel { id, label: Some(label) });
+        }
+    }
+    let updated = changed.len();
+    if updated != 0 {
+        s.commit("Recover Lightroom Color Labels", Op::Batch { ops: changed })?;
+    }
+    Ok(json!({"labelsOnly": true, "updated": updated, "kept": kept, "unmatched": unmatched, "conflicts": conflicts,
+        "unknownLabels": unknown, "warnings": data.warnings, "skipped": data.skipped}))
+}
+
 fn validate(data: &CatalogImport) -> Result<(), String> {
     let photos: HashMap<_, _> = data.photos.iter().map(|p| (p.source_id, p)).collect();
     if photos.len() != data.photos.len() {
@@ -440,6 +524,16 @@ pub fn read(path: &Path) -> Result<CatalogImport, String> {
 /// stopping when `cancel` is set. Images whose catalog records are incomplete are left out and
 /// listed in [`CatalogImport::skipped`] instead of failing the read.
 pub fn read_with_progress(path: &Path, cancel: &AtomicBool, total: &AtomicUsize, done: &AtomicUsize) -> Result<CatalogImport, String> {
+    read_catalog(path, cancel, total, done, false)
+}
+
+pub(crate) fn read_catalog(
+    path: &Path,
+    cancel: &AtomicBool,
+    total: &AtomicUsize,
+    done: &AtomicUsize,
+    labels_only: bool,
+) -> Result<CatalogImport, String> {
     // 13 catalog tables plus one validation stage; ImportJob adds one unit per original path.
     total.store(14, Ordering::Relaxed);
     done.store(0, Ordering::Relaxed);
@@ -471,7 +565,7 @@ pub fn read_with_progress(path: &Path, cancel: &AtomicBool, total: &AtomicUsize,
     };
     let optional_table = |name: &str, warnings: &mut Vec<String>| -> Result<Vec<Row>, String> {
         ensure_read_active(cancel)?;
-        let rows = reader.optional_table(name, warnings)?;
+        let rows = if labels_only { Vec::new() } else { reader.optional_table(name, warnings)? };
         done.fetch_add(1, Ordering::Relaxed);
         Ok(rows)
     };
@@ -482,9 +576,11 @@ pub fn read_with_progress(path: &Path, cancel: &AtomicBool, total: &AtomicUsize,
         .into_iter()
         .map(|r| (number(&r, "image"), text(&r, "text").to_string()))
         .collect();
+    let images = table("Adobe_images", true)?;
     ensure_read_active(cancel)?;
-    let (metadata_rows, metadata_warnings) = match reader.xmp_table() {
-        Ok(result) => result,
+    let needs_xmp = !labels_only || images.iter().any(|image| image.get("colorLabels").and_then(Value::as_str).is_none());
+    let (metadata_rows, metadata_warnings) = match needs_xmp.then(|| reader.xmp_table()).transpose() {
+        Ok(result) => result.unwrap_or_default(),
         Err(error) => {
             warnings.push(format!("skipping optional Lightroom table Adobe_AdditionalMetadata: {error}"));
             (Vec::new(), Vec::new())
@@ -559,7 +655,7 @@ pub fn read_with_progress(path: &Path, cancel: &AtomicBool, total: &AtomicUsize,
     // these behind and ignores them); they and their virtual copies are skipped and reported
     // instead of failing the import
     let mut orphans = HashSet::new();
-    for image in table("Adobe_images", true)? {
+    for image in images {
         ensure_read_active(cancel)?;
         let id = number(&image, "id_local");
         let record = files.get(&number(&image, "rootFile")).ok_or(SkipReason::MissingFile).and_then(|file| {
@@ -887,7 +983,17 @@ fn strip_xmp_sentinels(value: &mut Value) {
 /// Import into the current library. Existing edited records are preserved unless explicitly
 /// requested; missing originals remain catalogued for later relinking. The source catalog is read-only.
 pub fn import(s: &mut crate::Session, path: &Path, update_existing: bool) -> crate::Result<Value> {
-    let mut job = crate::lightroom_job::LightroomJob::new(s, path.to_path_buf(), update_existing)?;
+    let job = crate::lightroom_job::LightroomJob::new(s, path.to_path_buf(), update_existing)?;
+    run_job(s, job)
+}
+
+/// Read a catalog without importing originals, edits or collections.
+pub fn recover_labels(s: &mut crate::Session, path: &Path) -> crate::Result<Value> {
+    let job = crate::lightroom_job::LightroomJob::for_labels(s, path.to_path_buf())?;
+    run_job(s, job)
+}
+
+fn run_job(s: &mut crate::Session, mut job: crate::lightroom_job::LightroomJob) -> crate::Result<Value> {
     let cancel = AtomicBool::new(false);
     let prepared = job.prepare(&cancel)?;
     let completion = crate::lightroom_job::commit_prepared(s, prepared)?;
@@ -1055,12 +1161,7 @@ pub(crate) fn apply_prepared(s: &mut crate::Session, mut data: CatalogImport, co
         if refused.contains(&src.source_id) || refused.contains(&master) {
             continue;
         }
-        let indexed = index
-            .photos
-            .get(&identity(&data, src))
-            .copied()
-            .map(PhotoId)
-            .filter(|id| s.catalog.photo(*id).is_some_and(|p| source_path(p).is_some_and(|path| key(path) == key(&src.path))));
+        let indexed = indexed_photo(&s.catalog, &data, src, index);
         let existing_id = indexed.or_else(|| if master == 0 { by_path.get(&key(&src.path)).copied() } else { None });
         let mut p = if let Some(id) = existing_id.and_then(|id| s.catalog.photo(id)) {
             if id.deleted {
@@ -1155,6 +1256,8 @@ pub(crate) fn apply_prepared(s: &mut crate::Session, mut data: CatalogImport, co
         if keep_develop {
             preserved += 1;
         }
+        let previous_label = if master != 0 && existing_id.is_none() { None } else { p.label };
+        let mut xmp_label = None;
         let orientation = lightroom_orientation(text(&src.image, "orientation")).unwrap_or_default();
         let stored_aspect = number(&src.image, "fileWidth") as f64 / number(&src.image, "fileHeight") as f64;
         if !src.xmp.is_empty() {
@@ -1164,6 +1267,7 @@ pub(crate) fn apply_prepared(s: &mut crate::Session, mut data: CatalogImport, co
                         strip_xmp_sentinels(partial);
                         catalog_xmp_masks(partial, in_photo_frame(orientation, p.develop.orientation), stored_aspect, &p);
                     }
+                    xmp_label = sc.label_text.take();
                     crate::sidecar::merge_into(&mut p, &sc, &now);
                 }
                 Err(e) => warnings.push(format!("image {} XMP: {e}", src.source_id)),
@@ -1175,7 +1279,11 @@ pub(crate) fn apply_prepared(s: &mut crate::Session, mut data: CatalogImport, co
             -1 => Flag::Reject,
             _ => Flag::None,
         };
-        p.label = s.catalog.label_from_name(text(&src.image, "colorLabels"));
+        p.label = match src.image.get("colorLabels").and_then(Value::as_str).or(xmp_label.as_deref()) {
+            Some(name) if name.trim().is_empty() => None,
+            Some(name) => lightroom_label(&s.catalog, name).or(previous_label),
+            None => previous_label,
+        };
         if !text(&src.image, "captureTime").is_empty() {
             p.captured = Some(text(&src.image, "captureTime").into());
         }

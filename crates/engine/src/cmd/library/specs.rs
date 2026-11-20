@@ -1317,6 +1317,18 @@ pub fn specs() -> Vec<CommandSpec> {
             }
         ),
         cmd!(
+            "library.recoverLightroomLabels",
+            "Recover Lightroom Color Labels",
+            [],
+            None,
+            "{path: .lrcat}; fill missing color labels on matched library photos, preserving existing labels and all other metadata",
+            always,
+            |s, p| {
+                let path = str_param(p, "path").ok_or_else(|| bad("library.recoverLightroomLabels", "missing path"))?;
+                crate::lightroom_catalog::recover_labels(s, std::path::Path::new(path))
+            }
+        ),
+        cmd!(
             query "library.importPreview",
             "Review Import",
             [],
