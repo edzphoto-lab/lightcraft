@@ -1,4 +1,7 @@
 {
+  "Unrecognized Lightroom labels: {labels}": "Étiquettes Lightroom non reconnues : {labels}",
+  "{kept} existing labels kept. {unmatched} labeled Lightroom photos unmatched. {conflicts} conflicting matches.": "{kept} étiquettes existantes conservées. {unmatched} photos étiquetées sans correspondance. {conflicts} correspondances en conflit.",
+  "Lightroom color labels recovered on {updated} photos": "Étiquettes de couleur Lightroom récupérées sur {updated} photos",
   "Sheet {number} of {total}": "Planche {number} sur {total}",
   " ({unsure} with several look-alike files: use Locate)": " ({unsure} avec plusieurs fichiers similaires : utilisez Localiser)",
   " ({} in Recently Deleted)": " ({} dans « Supprimés récemment »)",
