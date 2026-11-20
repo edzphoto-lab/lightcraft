@@ -83,3 +83,39 @@ fn label_toast_has_pale_colour_and_rating_restores_neutral_style() {
     let rating = pixel(&h.paint(), at);
     assert!(rating.r() < 80 && rating.r() == rating.g() && rating.g() == rating.b(), "neutral rating toast: {rating:?}");
 }
+
+#[test]
+fn bottom_swatch_labels_photos_and_filter_matches_each_selected_choice() {
+    use lightcraft_catalog::ColorLabel;
+    let mut h = app(ViewMode::Detail);
+    let click = |h: &mut Headless, id: &str| {
+        let r = h.request("ui.clickWidget", json!({"id": id}), SETTLE);
+        assert_eq!(r["ok"], true, "{id}: {r}");
+        h.step();
+    };
+    click(&mut h, "label:bottom:blue");
+    assert_eq!(h.app.session.catalog.photo(PhotoId(1)).unwrap().label, Some(ColorLabel::Blue));
+    h.app.run("library.select", json!({"ids": [2]})).unwrap();
+    h.step();
+    click(&mut h, "label:bottom:purple");
+    assert_eq!(h.app.session.catalog.photo(PhotoId(2)).unwrap().label, Some(ColorLabel::Purple));
+
+    for (choice, expected) in [
+        ("blue", &[1][..]),
+        ("purple", &[1, 2]),
+        ("none", &[1, 2, 3, 4, 5, 6]),
+        ("blue", &[2, 3, 4, 5, 6]),
+        ("purple", &[3, 4, 5, 6]),
+        ("none", &[1, 2, 3, 4, 5, 6]),
+    ] {
+        click(&mut h, &format!("filter:bottomLabel:{choice}"));
+        let visible = h.app.session.visible().iter().map(|id| id.0).collect::<Vec<_>>();
+        assert_eq!(visible, expected, "{choice}");
+        assert!(h.app.session.active().is_some_and(|id| expected.contains(&id.0)));
+        assert_eq!(h.app.widgets.iter().filter(|(id, _)| id.starts_with("film:")).count(), expected.len());
+    }
+    h.app.run("library.select", json!({"ids": [1]})).unwrap();
+    h.step();
+    click(&mut h, "label:bottom:blue");
+    assert_eq!(h.app.session.catalog.photo(PhotoId(1)).unwrap().label, None);
+}

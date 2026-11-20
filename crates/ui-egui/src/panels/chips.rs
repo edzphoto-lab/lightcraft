@@ -33,13 +33,16 @@ fn chip_width(ui: &egui::Ui, label: &str, font: egui::FontId) -> f32 {
 fn label_names(filter: &lightcraft_catalog::Filter, catalog: &lightcraft_catalog::Catalog) -> String {
     use crate::i18n::tr;
     let shown = filter.labels_shown().unwrap_or_default();
-    let name = |label: &lightcraft_catalog::ColorLabel| crate::i18n::color_label(catalog, *label);
-    let or = |labels: &[lightcraft_catalog::ColorLabel]| labels.iter().map(name).collect::<Vec<_>>().join(&format!(" {} ", tr("or")));
+    let name =
+        |label: Option<lightcraft_catalog::ColorLabel>| label.map_or_else(|| tr("No Color Label").into(), |l| crate::i18n::color_label(catalog, l));
+    let or =
+        |labels: &[Option<lightcraft_catalog::ColorLabel>]| labels.iter().copied().map(name).collect::<Vec<_>>().join(&format!(" {} ", tr("or")));
     if !shown.is_empty() {
         return or(&shown);
     }
-    let plural = if filter.labels.len() > 1 { format!("({})", or(&filter.labels)) } else { or(&filter.labels) };
-    format!("{} {} {plural}", filter.label.as_ref().map(name).unwrap_or_default(), tr("and"))
+    let choices = filter.label_choices();
+    let plural = if choices.len() > 1 { format!("({})", or(&choices)) } else { or(&choices) };
+    format!("{} {} {plural}", name(filter.label), tr("and"))
 }
 
 /// The value of a `prefix: value` chip, localised.

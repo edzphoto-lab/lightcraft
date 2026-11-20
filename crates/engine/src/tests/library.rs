@@ -355,6 +355,15 @@ fn filter_any_of_several_labels() {
     assert!(s.filter.describe().contains("label red or yellow"));
     s.execute("library.filter", &serde_json::json!({"labels": []})).unwrap();
     assert!(s.visible_cloned().len() > want);
+
+    let patch = json!({"labels": ["red", "yellow"], "includeUnlabeled": true});
+    s.execute("library.filter", &patch).unwrap();
+    let expected = s.catalog.photos().filter(|p| p.in_library() && p.label != Some(ColorLabel::Green)).count();
+    assert_eq!(s.visible().len(), expected);
+    let chip = crate::filter_chips(&s.filter, &s.catalog).into_iter().find(|c| c.label.starts_with("Label")).unwrap();
+    assert_eq!(chip.label, "Label: Red or Yellow or No Color Label");
+    s.execute("library.filter", &chip.clear).unwrap();
+    assert_eq!(s.filter, lightcraft_catalog::Filter::default());
 }
 
 /// The filter bar's flag multi-select (#2588): Picked and Unflagged together hide only the rejects,

@@ -22,6 +22,27 @@ fn filter(app: &mut LightcraftApp, patch: Value) {
     let _ = app.run("library.filter", patch);
 }
 
+/// Toggle one alternative without changing the other filter fields.
+pub(super) fn toggle_label(app: &mut LightcraftApp, label: Option<ColorLabel>) {
+    let mut chosen = app.session.filter.labels_shown().unwrap_or_default();
+    if chosen.contains(&label) {
+        chosen.retain(|l| *l != label);
+    } else {
+        chosen.push(label);
+    }
+    let labels = ColorLabel::ALL.into_iter().filter(|l| chosen.contains(&Some(*l))).map(|l| super::grid::label_param(Some(l))).collect::<Vec<_>>();
+    let patch = json!({"label": null, "labels": labels, "includeUnlabeled": chosen.contains(&None)});
+    if app.run("library.filter", patch).is_ok() {
+        app.session.keep_active_in_view();
+    }
+}
+
+pub(super) fn draw_unlabeled(painter: &egui::Painter, rect: Rect, ink: Color32) {
+    let stroke = Stroke::new(1.0, ink);
+    painter.rect_stroke(rect, 2.0, stroke, StrokeKind::Inside);
+    painter.line_segment([rect.left_bottom() + vec2(1.0, -1.0), rect.right_top() + vec2(-1.0, 1.0)], stroke);
+}
+
 /// A small label before a group of controls.
 fn caption(ui: &mut egui::Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
@@ -165,25 +186,23 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
 
     // colour labels
     caption(ui, "Label");
-    // several labels can be on at once (any of them matches); lit are those `label` and `labels` both let through
-    let chosen: Vec<ColorLabel> = f.labels_shown().unwrap_or_default();
-    for l in ColorLabel::ALL {
-        let on = chosen.contains(&l);
-        let name = format!("{l:?}").to_lowercase();
-        let tip = crate::i18n::tr_format!("{} label (click more labels to show any of them)", crate::i18n::color_label(&app.session.catalog, l));
-        let resp = toggle(ui, &format!("label-{name}"), on, &tip, |p, r, _| {
-            p.circle_filled(r.center(), 5.5, label_color(l));
+    let chosen = f.labels_shown().unwrap_or_default();
+    for label in ColorLabel::ALL.into_iter().map(Some).chain([None]) {
+        let on = chosen.contains(&label);
+        let name = super::grid::label_param(label);
+        let tip = label.map_or_else(
+            || crate::i18n::tr("No Color Label").into(),
+            |l| crate::i18n::tr_format!("{} label (click more labels to show any of them)", crate::i18n::color_label(&app.session.catalog, l)),
+        );
+        let resp = toggle(ui, &format!("label-{name}"), on, &tip, |p, r, ink| {
+            if let Some(l) = label {
+                p.circle_filled(r.center(), 5.5, label_color(l));
+            } else {
+                draw_unlabeled(p, Rect::from_center_size(r.center(), vec2(11.0, 11.0)), ink);
+            }
         });
         if resp.clicked() {
-            let mut next = chosen.clone();
-            if on {
-                next.retain(|x| *x != l);
-            } else {
-                next.push(l);
-            }
-            next.sort();
-            let names: Vec<String> = next.iter().map(|x| format!("{x:?}").to_lowercase()).collect();
-            filter(app, json!({"label": Value::Null, "labels": names}));
+            toggle_label(app, label);
         }
     }
     ui.add_space(14.0);

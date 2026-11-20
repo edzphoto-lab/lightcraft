@@ -1,7 +1,7 @@
 //! The bottom bar: view modes, sort, rating/flags pill, copy/paste, sync, zoom and view toggles.
 
-use egui::{Align2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
-use lightcraft_catalog::Flag;
+use egui::{Align2, Color32, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
+use lightcraft_catalog::{ColorLabel, Flag};
 use serde_json::json;
 
 use crate::LightcraftApp;
@@ -34,7 +34,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
             let left_end = left_ui
                 .horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
-                    if left_rect.width() >= 270.0 {
+                    if left_rect.width() >= 270.0 + PILL_W + COMPACT_FILTER_W + 24.0 {
                         for &(id, icon, mode, tip) in VIEW_MODES {
                             if icon_button(ui, id, icon, vec2(32.0, 32.0), app.ui.view == mode, true, tip).clicked() {
                                 let _ = app.run(&format!("view.{id}"), json!({}));
@@ -79,11 +79,13 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
         });
 }
 
-/// Five 19-point stars, three 22-point flags, seven 3-point gaps, a 6-point group gap
-/// and 10-point padding at both ends.
-const PILL_W: f32 = 208.0;
+// The original 208-point pill plus five 19-point swatches, gaps and padding.
+const PILL_W: f32 = 324.0;
+const FILTER_W: f32 = 148.0;
+const COMPACT_FILTER_W: f32 = 28.0;
+const SWATCH_W: f32 = 19.0;
 
-/// Keep the rating pill and edit buttons between the side groups, dropping buttons as space runs out.
+/// Keep the attribute pill, edit controls and colour filter between the side groups.
 fn centre(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, from: f32, to: f32) {
     let t = Tokens::get(ui.ctx());
     let has_clip = app.session.clipboard.is_some();
@@ -91,15 +93,24 @@ fn centre(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, from: f32, to:
     let copy_width = (ui.painter().layout_no_wrap(label.to_string(), t.font(13.0), t.text_label).size().x + 24.0).max(136.0);
     let centre_width = PILL_W + 10.0 + copy_width + 4.0 + 30.0;
     let room = to - from;
+    let filter_width = if room >= PILL_W + FILTER_W + 10.0 { FILTER_W } else { COMPACT_FILTER_W };
+    let to = if room >= filter_width {
+        colour_filter(app, ui, Rect::from_min_size(pos2(to - filter_width, full.center().y - 14.0), vec2(filter_width, 28.0)), filter_width);
+        to - filter_width - 10.0
+    } else {
+        to
+    };
+    let room = to - from;
     if room < PILL_W {
         return;
     }
     const SYNC_SIZE: f32 = 28.0;
     const SYNC_GAP: f32 = 4.0;
     let sync_width = 2.0 * (SYNC_SIZE + SYNC_GAP);
-    let with_sync = room >= PILL_W + sync_width;
-    let with_copy = room >= centre_width + if with_sync { sync_width } else { 0.0 };
-    let w = (if with_copy { centre_width } else { PILL_W }) + (if with_sync { sync_width } else { 0.0 });
+    let with_copy = room >= centre_width;
+    let edits_width = if with_copy { centre_width } else { PILL_W };
+    let with_sync = room >= edits_width + sync_width;
+    let w = edits_width + if with_sync { sync_width } else { 0.0 };
     // where it sits with room to spare (slightly left of centre), kept between the side groups
     let left = (full.center().x - 60.0 - PILL_W / 2.0).clamp(from, to - w);
     let active = app.session.active().and_then(|id| app.session.catalog.photo(id).cloned());
@@ -145,6 +156,20 @@ fn centre(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, from: f32, to:
             let _ = app.run("photo.flag", params);
         }
     }
+    pill_ui.add_space(4.0);
+    let current = active.as_ref().and_then(|photo| photo.label);
+    pill_ui.add_enabled_ui(active.is_some(), |pill_ui| {
+        for colour in ColorLabel::ALL {
+            let name = super::grid::label_param(Some(colour));
+            let tip = crate::i18n::color_label(&app.session.catalog, colour);
+            let on = current == Some(colour);
+            if swatch(pill_ui, &format!("label:bottom:{name}"), Some(colour), on, true, &tip) {
+                let mut params = json!({"label": if on { "none" } else { name.as_str() }});
+                crate::panels::compare::target_active(app, &mut params);
+                let _ = app.run("photo.label", params);
+            }
+        }
+    });
     // copy / paste settings
     let mut end = pill.right();
     if with_copy {
@@ -197,6 +222,58 @@ fn centre(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, from: f32, to:
                     Err(error) => app.toast_error(ui.ctx(), error),
                 }
             }
+        }
+    }
+}
+
+fn swatch(ui: &mut egui::Ui, id: &str, label: Option<ColorLabel>, on: bool, vivid: bool, tip: &str) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let (r, response) = ui.allocate_exact_size(vec2(SWATCH_W, 22.0), Sense::click());
+    register(ui, id, r);
+    crate::widgets::announce_selected(&response, tip, on);
+    let square = Rect::from_center_size(r.center(), vec2(13.0, 13.0));
+    let p = ui.painter();
+    if let Some(label) = label {
+        let colour = crate::theme::label_color(label);
+        let colour = if ui.is_enabled() && (vivid || on || response.hovered()) { colour } else { t.chrome.lerp_to_gamma(colour, 0.64) };
+        p.rect_filled(square, 2.0, colour);
+    } else {
+        super::filterbar::draw_unlabeled(p, square, t.icon);
+    }
+    if on {
+        p.rect_stroke(square.expand(2.0), 3.0, Stroke::new(1.25, Color32::WHITE), StrokeKind::Inside);
+    }
+    if response.has_focus() {
+        crate::widgets::focus_ring(p, r, &t);
+    }
+    response.on_hover_text(tip).clicked()
+}
+
+fn colour_filter(app: &mut LightcraftApp, ui: &mut egui::Ui, rect: Rect, width: f32) {
+    let t = Tokens::get(ui.ctx());
+    let chosen = app.session.filter.labels_shown().unwrap_or_default();
+    let mut group = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    group.spacing_mut().item_spacing.x = 2.0;
+    if width == COMPACT_FILTER_W {
+        let button = icon_button(&mut group, "colourFilter", Icon::Filter, rect.size(), !chosen.is_empty(), true, "Filter by Color Label");
+        egui::Popup::menu(&button).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+            ui.horizontal(|ui| {
+                filter_swatches(app, ui, &chosen);
+            });
+        });
+    } else {
+        paint(group.painter(), Rect::from_center_size(rect.left_center() + vec2(8.0, 0.0), vec2(15.0, 15.0)), Icon::Filter, t.icon);
+        group.add_space(18.0);
+        filter_swatches(app, &mut group, &chosen);
+    }
+}
+
+fn filter_swatches(app: &mut LightcraftApp, ui: &mut egui::Ui, chosen: &[Option<ColorLabel>]) {
+    for label in ColorLabel::ALL.into_iter().map(Some).chain([None]) {
+        let id = super::grid::label_param(label);
+        let tip = label.map_or_else(|| crate::i18n::tr("No Color Label").into(), |l| crate::i18n::color_label(&app.session.catalog, l));
+        if swatch(ui, &format!("filter:bottomLabel:{id}"), label, chosen.contains(&label), false, &tip) {
+            super::filterbar::toggle_label(app, label);
         }
     }
 }
@@ -552,11 +629,11 @@ mod tests {
     #[test]
     fn rating_and_flag_buttons_keep_padding_inside_the_pill() {
         for scale in [1.0, 2.0] {
-            for room in [240.0, 500.0] {
+            for room in [380.0, 760.0] {
                 let mut app = LightcraftApp::new(lightcraft_engine::Session::new(), Services::default());
                 let mut view = HeadlessView::new();
                 for frame in 0..3 {
-                    let raw = HeadlessView::raw_input(vec2(700.0, 40.0), scale, frame as f64 / 60.0, vec![]);
+                    let raw = HeadlessView::raw_input(vec2(850.0, 40.0), scale, frame as f64 / 60.0, vec![]);
                     view.run(raw, |ui| {
                         let full = ui.max_rect();
                         centre(&mut app, ui, full, 20.0, 20.0 + room);
@@ -573,7 +650,7 @@ mod tests {
                         .unwrap();
                     let inner = pill.shrink2(vec2(10.0, 4.0));
                     for (id, rect) in &widgets {
-                        if id.starts_with("star:bottom:") || id.starts_with("flag:") {
+                        if id.starts_with("star:bottom:") || id.starts_with("flag:") || id.starts_with("label:bottom:") {
                             assert!(inner.contains_rect(*rect), "{id} {rect:?} exceeds the pill's padded bounds {inner:?} at scale {scale}");
                         }
                     }

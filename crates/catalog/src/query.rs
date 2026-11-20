@@ -36,6 +36,9 @@ pub struct Filter {
     /// Any of these labels (the filter bar's multi-select); empty = no constraint.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<ColorLabel>,
+    /// Include photos without a colour label alongside the chosen labels.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub include_unlabeled: bool,
     /// Any of these flags (the filter bar's multi-select: Picked and Unflagged hide only the
     /// rejects); empty = no constraint.
     #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "null_as_empty")]
@@ -254,15 +257,20 @@ fn has_person(p: &Photo, name: &str) -> bool {
 }
 
 impl Filter {
-    /// The labels that `label` and `labels` let through together (they AND), in `labels`' order;
-    /// `None` when neither is set, empty when they exclude each other. The chip and the filter
-    /// bar's buttons show this, so they match what is filtered.
-    pub fn labels_shown(&self) -> Option<Vec<ColorLabel>> {
-        match (self.label, self.labels.is_empty()) {
-            (None, true) => None,
-            (Some(l), true) => Some(vec![l]),
-            (l, false) => Some(self.labels.iter().copied().filter(|x| l.is_none_or(|l| l == *x)).collect()),
+    /// The alternatives in the multi-select, in its stored order. A missing label is an option.
+    pub fn label_choices(&self) -> Vec<Option<ColorLabel>> {
+        self.labels.iter().copied().map(Some).chain(self.include_unlabeled.then_some(None)).collect()
+    }
+
+    /// The alternatives that the single-label constraint and the multi-select let through together.
+    /// No constraint is distinct from an empty result when the two constraints contradict.
+    pub fn labels_shown(&self) -> Option<Vec<Option<ColorLabel>>> {
+        let mut choices = self.label_choices();
+        if choices.is_empty() {
+            return self.label.map(|label| vec![Some(label)]);
         }
+        choices.retain(|label| self.label.is_none_or(|single| *label == Some(single)));
+        Some(choices)
     }
 
     /// Human-readable summary of the active rules (smart album tooltips, `album.list`).
@@ -305,8 +313,10 @@ impl Filter {
         if let Some(l) = self.label {
             v.push(format!("label {}", format!("{l:?}").to_lowercase()));
         }
-        if !self.labels.is_empty() {
-            v.push(format!("label {}", self.labels.iter().map(|l| format!("{l:?}").to_lowercase()).collect::<Vec<_>>().join(" or ")));
+        let choices = self.label_choices();
+        if !choices.is_empty() {
+            let names = choices.iter().map(|l| l.map_or_else(|| "none".into(), |x| format!("{x:?}").to_lowercase())).collect::<Vec<_>>();
+            v.push(format!("label {}", names.join(" or ")));
         }
         if let Some(k) = self.kind {
             v.push(format!("kind {}", format!("{k:?}").to_lowercase()));
@@ -431,7 +441,7 @@ impl Filter {
         {
             return false;
         }
-        if !self.labels.is_empty() && !p.label.is_some_and(|l| self.labels.contains(&l)) {
+        if (!self.labels.is_empty() || self.include_unlabeled) && !p.label.map_or(self.include_unlabeled, |l| self.labels.contains(&l)) {
             return false;
         }
         if !self.flags.is_empty() && !self.flags.contains(&p.flag) {

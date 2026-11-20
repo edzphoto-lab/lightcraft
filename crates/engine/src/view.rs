@@ -172,16 +172,18 @@ pub fn filter_chips(f: &Filter, cat: &Catalog) -> Vec<FilterChip> {
         add(format!("Flag: {names}"), json!({"flag": Null, "flags": []}));
     }
     if let Some(shown) = f.labels_shown() {
-        let or = |ls: &[lightcraft_catalog::ColorLabel]| ls.iter().map(|l| cat.label_name(*l)).collect::<Vec<_>>().join(" or ");
+        let name = |l: Option<lightcraft_catalog::ColorLabel>| l.map_or_else(|| "No Color Label".into(), |l| cat.label_name(l));
+        let or = |ls: &[Option<lightcraft_catalog::ColorLabel>]| ls.iter().copied().map(name).collect::<Vec<_>>().join(" or ");
         // empty: `label` and `labels` exclude each other, so name both constraints
         let names = if shown.is_empty() {
             // parenthesised when plural, so "Red and Yellow or Green" cannot read as "(Red and Yellow) or Green"
-            let plural = if f.labels.len() > 1 { format!("({})", or(&f.labels)) } else { or(&f.labels) };
+            let choices = f.label_choices();
+            let plural = if choices.len() > 1 { format!("({})", or(&choices)) } else { or(&choices) };
             format!("{} and {plural}", f.label.map(|l| cat.label_name(l)).unwrap_or_default())
         } else {
             or(&shown)
         };
-        add(format!("Label: {names}"), json!({"label": Null, "labels": []}));
+        add(format!("Label: {names}"), json!({"label": Null, "labels": [], "includeUnlabeled": false}));
     }
     if let Some(k) = f.kind {
         let n = match k {
