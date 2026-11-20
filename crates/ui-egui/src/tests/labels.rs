@@ -88,6 +88,8 @@ fn label_toast_has_pale_colour_and_rating_restores_neutral_style() {
 fn bottom_swatch_labels_photos_and_filter_matches_each_selected_choice() {
     use lightcraft_catalog::ColorLabel;
     let mut h = app(ViewMode::Detail);
+    h.size.x = 1650.0;
+    h.step();
     let click = |h: &mut Headless, id: &str| {
         let r = h.request("ui.clickWidget", json!({"id": id}), SETTLE);
         assert_eq!(r["ok"], true, "{id}: {r}");

@@ -1,7 +1,7 @@
 //! The bottom bar: view modes, sort, rating/flags pill, copy/paste, sync, zoom and view toggles.
 
 use egui::{Align2, Color32, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
-use lightcraft_catalog::{ColorLabel, Flag};
+use lightcraft_catalog::{ColorLabel, Flag, Photo};
 use serde_json::json;
 
 use crate::LightcraftApp;
@@ -27,14 +27,14 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
         .show(ui, |ui| {
             crate::widgets::announce_region(ui, egui::accesskit::Role::Toolbar, crate::i18n::tr("Bottom bar"));
             let full = ui.max_rect();
-            let compact_zoom = full.width() < 360.0;
+            let compact_zoom = full.width() < 820.0;
             let right_start = right_side(app, ui, full, compact_zoom);
             let left_rect = Rect::from_min_max(full.min, pos2((right_start - 12.0).max(full.left()), full.bottom()));
             let mut left_ui = ui.new_child(egui::UiBuilder::new().max_rect(left_rect));
             let left_end = left_ui
                 .horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
-                    if left_rect.width() >= 270.0 + PILL_W + COMPACT_FILTER_W + 24.0 {
+                    if !compact_zoom && left_rect.width() >= 270.0 + COMPACT_EDITS_W + COMPACT_FILTER_W + SYNC_W + 24.0 {
                         for &(id, icon, mode, tip) in VIEW_MODES {
                             if icon_button(ui, id, icon, vec2(32.0, 32.0), app.ui.view == mode, true, tip).clicked() {
                                 let _ = app.run(&format!("view.{id}"), json!({}));
@@ -84,16 +84,22 @@ const PILL_W: f32 = 324.0;
 const FILTER_W: f32 = 148.0;
 const COMPACT_FILTER_W: f32 = 28.0;
 const SWATCH_W: f32 = 19.0;
+const SYNC_SIZE: f32 = 28.0;
+const SYNC_GAP: f32 = 4.0;
+const SYNC_W: f32 = 2.0 * (SYNC_SIZE + SYNC_GAP);
+const COPY_COMPACT_W: f32 = 30.0;
+// Gap from the pill, gap before the gear, and the gear itself.
+const COPY_EXTRA_W: f32 = 10.0 + 4.0 + 30.0;
+const COMPACT_EDITS_W: f32 = PILL_W + COPY_COMPACT_W + COPY_EXTRA_W;
 
 /// Keep the attribute pill, edit controls and colour filter between the side groups.
 fn centre(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, from: f32, to: f32) {
     let t = Tokens::get(ui.ctx());
     let has_clip = app.session.clipboard.is_some();
     let label = crate::i18n::tr(if has_clip { "Paste Edit Settings" } else { "Copy Edit Settings" });
-    let copy_width = (ui.painter().layout_no_wrap(label.to_string(), t.font(13.0), t.text_label).size().x + 24.0).max(136.0);
-    let centre_width = PILL_W + 10.0 + copy_width + 4.0 + 30.0;
+    let full_copy_width = (ui.painter().layout_no_wrap(label.to_string(), t.font(13.0), t.text_label).size().x + 24.0).max(136.0);
     let room = to - from;
-    let filter_width = if room >= PILL_W + FILTER_W + 10.0 { FILTER_W } else { COMPACT_FILTER_W };
+    let filter_width = if room >= COMPACT_EDITS_W + SYNC_W + FILTER_W + 10.0 { FILTER_W } else { COMPACT_FILTER_W };
     let to = if room >= filter_width {
         colour_filter(app, ui, Rect::from_min_size(pos2(to - filter_width, full.center().y - 14.0), vec2(filter_width, 28.0)), filter_width);
         to - filter_width - 10.0
@@ -104,29 +110,93 @@ fn centre(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, from: f32, to:
     if room < PILL_W {
         return;
     }
-    const SYNC_SIZE: f32 = 28.0;
-    const SYNC_GAP: f32 = 4.0;
-    let sync_width = 2.0 * (SYNC_SIZE + SYNC_GAP);
-    let with_copy = room >= centre_width;
-    let edits_width = if with_copy { centre_width } else { PILL_W };
-    let with_sync = room >= edits_width + sync_width;
-    let w = edits_width + if with_sync { sync_width } else { 0.0 };
+    let compact_copy = room < PILL_W + COPY_EXTRA_W + full_copy_width + SYNC_W;
+    let copy_width = if compact_copy { COPY_COMPACT_W } else { full_copy_width };
+    let with_copy = room >= COMPACT_EDITS_W;
+    let edits_width = if with_copy { PILL_W + COPY_EXTRA_W + copy_width } else { PILL_W };
+    let with_sync = room >= edits_width + SYNC_W;
+    let w = edits_width + if with_sync { SYNC_W } else { 0.0 };
     // where it sits with room to spare (slightly left of centre), kept between the side groups
     let left = (full.center().x - 60.0 - PILL_W / 2.0).clamp(from, to - w);
     let active = app.session.active().and_then(|id| app.session.catalog.photo(id).cloned());
     let pill = Rect::from_min_size(pos2(left, full.center().y - 15.0), vec2(PILL_W, 30.0));
+    attributes(app, ui, pill, active.as_deref());
+    // copy / paste settings
+    let mut end = pill.right();
+    if with_copy {
+        let copy_r = Rect::from_min_size(pos2(pill.right() + 10.0, pill.top()), vec2(copy_width, 30.0));
+        let cresp = ui.interact(copy_r, egui::Id::unique("copy-settings"), Sense::click());
+        crate::widgets::announce(&cresp, label.to_string());
+        register(ui, "button:copySettings", copy_r);
+        ui.painter().rect_filled(copy_r, 15.0, if cresp.hovered() { t.hover } else { t.canvas });
+        let ink = if active.is_some() { t.text_label } else { t.text_disabled };
+        if compact_copy {
+            paint(ui.painter(), copy_r.shrink(7.0), Icon::Versions, ink);
+        } else {
+            ui.painter().text(copy_r.center(), Align2::CENTER_CENTER, label, t.font(13.0), ink);
+        }
+        let cresp = cresp.on_hover_text(label);
+        if cresp.clicked() && active.is_some() {
+            let _ = if has_clip { app.run("develop.paste", json!({})) } else { app.run("develop.copy", json!({})) };
+            let msg = if has_clip { "Settings pasted" } else { "Edit settings copied" };
+            app.toast(ui.ctx(), crate::i18n::tr(msg));
+        }
+        let gear_r = Rect::from_min_size(pos2(copy_r.right() + 4.0, pill.top()), vec2(30.0, 30.0));
+        let gresp = ui.interact(gear_r, egui::Id::unique("copy-gear"), Sense::click());
+        crate::widgets::announce(&gresp, crate::i18n::tr("Copy Settings…"));
+        register(ui, "icon:copyGear", gear_r);
+        ui.painter().rect_filled(gear_r, 15.0, if gresp.hovered() { t.hover } else { t.canvas });
+        paint(ui.painter(), gear_r.shrink(7.0), Icon::Gear, t.icon);
+        if gresp.clicked() {
+            let _ = app.run("dialog.copySettings", json!({}));
+        }
+        end = gear_r.right();
+    }
+    if with_sync {
+        let sync_r = Rect::from_min_size(pos2(end + SYNC_GAP, full.center().y - SYNC_SIZE / 2.0), vec2(SYNC_W - SYNC_GAP, SYNC_SIZE));
+        let mut sync_ui = ui.new_child(egui::UiBuilder::new().max_rect(sync_r).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        sync_ui.spacing_mut().item_spacing.x = SYNC_GAP;
+        let enabled = active.as_ref().filter(|photo| !photo.deleted && !photo.is_video()).is_some_and(|source| {
+            app.session
+                .selection
+                .ids
+                .iter()
+                .any(|&id| id != source.id && app.session.catalog.photo(id).is_some_and(|photo| !photo.deleted && !photo.is_video()))
+        });
+        for (index, (id, icon, tooltip, mode, message)) in [
+            ("syncDevelopment", Icon::Sliders, "Synchronize Development", "development", "Development settings synchronized"),
+            ("syncCrop", Icon::Crop, "Synchronize Crop", "crop", "Crop synchronized"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let button = Rect::from_min_size(sync_r.min + vec2(index as f32 * (SYNC_SIZE + SYNC_GAP), 0.0), vec2(SYNC_SIZE, SYNC_SIZE));
+            ui.painter().rect_stroke(button, 4.0, Stroke::new(1.0, t.button_border), StrokeKind::Inside);
+            if icon_button(&mut sync_ui, id, icon, vec2(SYNC_SIZE, SYNC_SIZE), false, enabled, tooltip).clicked() {
+                match app.run("develop.sync", json!({"mode": mode})) {
+                    Ok(result) if result["changed"] == 0 => app.toast(ui.ctx(), crate::i18n::tr("No settings to synchronize")),
+                    Ok(_) => app.toast(ui.ctx(), crate::i18n::tr(message)),
+                    Err(error) => app.toast_error(ui.ctx(), error),
+                }
+            }
+        }
+    }
+}
+
+fn attributes(app: &mut LightcraftApp, ui: &mut egui::Ui, pill: Rect, active: Option<&Photo>) {
+    let t = Tokens::get(ui.ctx());
     ui.painter().rect_filled(pill, 15.0, t.canvas);
     let mut pill_ui =
         ui.new_child(egui::UiBuilder::new().max_rect(pill.shrink2(vec2(10.0, 4.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
     pill_ui.spacing_mut().item_spacing.x = 3.0;
-    let rating = active.as_ref().map(|p| p.rating).unwrap_or(0);
+    let rating = active.map(|p| p.rating).unwrap_or(0);
     if let Some(r) = crate::rating::Rating::new("bottom", rating).show(&mut pill_ui) {
         let mut params = json!({"rating": r});
         crate::panels::compare::target_active(app, &mut params);
         let _ = app.run("photo.rate", params);
     }
     pill_ui.add_space(6.0);
-    let flag = active.as_ref().map(|p| p.flag).unwrap_or_default();
+    let flag = active.map(|p| p.flag).unwrap_or_default();
     for (id, icon, f) in [("unflag", Icon::Circle, Flag::None), ("pick", Icon::FlagPick, Flag::Pick), ("reject", Icon::FlagReject, Flag::Reject)] {
         let (r, resp) = pill_ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
         crate::widgets::announce_selected(
@@ -157,7 +227,7 @@ fn centre(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, from: f32, to:
         }
     }
     pill_ui.add_space(4.0);
-    let current = active.as_ref().and_then(|photo| photo.label);
+    let current = active.and_then(|photo| photo.label);
     pill_ui.add_enabled_ui(active.is_some(), |pill_ui| {
         for colour in ColorLabel::ALL {
             let name = super::grid::label_param(Some(colour));
@@ -170,60 +240,6 @@ fn centre(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, from: f32, to:
             }
         }
     });
-    // copy / paste settings
-    let mut end = pill.right();
-    if with_copy {
-        let copy_r = Rect::from_min_size(pos2(pill.right() + 10.0, pill.top()), vec2(copy_width, 30.0));
-        let cresp = ui.interact(copy_r, egui::Id::unique("copy-settings"), Sense::click());
-        crate::widgets::announce(&cresp, label.to_string());
-        register(ui, "button:copySettings", copy_r);
-        ui.painter().rect_filled(copy_r, 15.0, if cresp.hovered() { t.hover } else { t.canvas });
-        ui.painter().text(copy_r.center(), Align2::CENTER_CENTER, label, t.font(13.0), if active.is_some() { t.text_label } else { t.text_disabled });
-        if cresp.clicked() && active.is_some() {
-            let _ = if has_clip { app.run("develop.paste", json!({})) } else { app.run("develop.copy", json!({})) };
-            let msg = if has_clip { "Settings pasted" } else { "Edit settings copied" };
-            app.toast(ui.ctx(), crate::i18n::tr(msg));
-        }
-        let gear_r = Rect::from_min_size(pos2(copy_r.right() + 4.0, pill.top()), vec2(30.0, 30.0));
-        let gresp = ui.interact(gear_r, egui::Id::unique("copy-gear"), Sense::click());
-        crate::widgets::announce(&gresp, crate::i18n::tr("Copy Settings…"));
-        register(ui, "icon:copyGear", gear_r);
-        ui.painter().rect_filled(gear_r, 15.0, if gresp.hovered() { t.hover } else { t.canvas });
-        paint(ui.painter(), gear_r.shrink(7.0), Icon::Gear, t.icon);
-        if gresp.clicked() {
-            let _ = app.run("dialog.copySettings", json!({}));
-        }
-        end = gear_r.right();
-    }
-    if with_sync {
-        let sync_r = Rect::from_min_size(pos2(end + SYNC_GAP, full.center().y - SYNC_SIZE / 2.0), vec2(sync_width - SYNC_GAP, SYNC_SIZE));
-        let mut sync_ui = ui.new_child(egui::UiBuilder::new().max_rect(sync_r).layout(egui::Layout::left_to_right(egui::Align::Center)));
-        sync_ui.spacing_mut().item_spacing.x = SYNC_GAP;
-        let enabled = active.as_ref().filter(|photo| !photo.deleted && !photo.is_video()).is_some_and(|source| {
-            app.session
-                .selection
-                .ids
-                .iter()
-                .any(|&id| id != source.id && app.session.catalog.photo(id).is_some_and(|photo| !photo.deleted && !photo.is_video()))
-        });
-        for (index, (id, icon, tooltip, mode, message)) in [
-            ("syncDevelopment", Icon::Sliders, "Synchronize Development", "development", "Development settings synchronized"),
-            ("syncCrop", Icon::Crop, "Synchronize Crop", "crop", "Crop synchronized"),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let button = Rect::from_min_size(sync_r.min + vec2(index as f32 * (SYNC_SIZE + SYNC_GAP), 0.0), vec2(SYNC_SIZE, SYNC_SIZE));
-            ui.painter().rect_stroke(button, 4.0, Stroke::new(1.0, t.button_border), StrokeKind::Inside);
-            if icon_button(&mut sync_ui, id, icon, vec2(SYNC_SIZE, SYNC_SIZE), false, enabled, tooltip).clicked() {
-                match app.run("develop.sync", json!({"mode": mode})) {
-                    Ok(result) if result["changed"] == 0 => app.toast(ui.ctx(), crate::i18n::tr("No settings to synchronize")),
-                    Ok(_) => app.toast(ui.ctx(), crate::i18n::tr(message)),
-                    Err(error) => app.toast_error(ui.ctx(), error),
-                }
-            }
-        }
-    }
 }
 
 fn swatch(ui: &mut egui::Ui, id: &str, label: Option<ColorLabel>, on: bool, vivid: bool, tip: &str) -> bool {
