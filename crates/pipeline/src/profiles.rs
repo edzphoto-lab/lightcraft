@@ -41,6 +41,9 @@ fn fade(pts: &mut Vec<Point>, black: f64, white: f64, k: f64) {
     }
 }
 
+/// An opt-in Vivid variant for intensely red lighting.
+pub const VIVID_RED_ID: &str = "lc.vivid.red";
+
 /// The settings the pipeline actually renders: user settings plus the profile's look.
 pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
     let k = (s.profile.amount / 100.0).clamp(0.0, 2.0);
@@ -58,7 +61,7 @@ pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
             add(&mut e.light.highlights, -10.0);
             add(&mut e.light.shadows, 8.0);
         }
-        "lc.vivid" => {
+        "lc.vivid" | VIVID_RED_ID => {
             add(&mut e.light.contrast, 16.0);
             add(&mut e.color.saturation, 14.0);
             add(&mut e.color.vibrance, 14.0);
@@ -221,6 +224,7 @@ pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
 pub const LOOK_IDS: &[&str] = &[
     "lc.neutral",
     "lc.vivid",
+    VIVID_RED_ID,
     "lc.landscape",
     "lc.portrait",
     "lc.mono",

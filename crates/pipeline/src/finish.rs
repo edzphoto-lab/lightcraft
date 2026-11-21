@@ -169,6 +169,8 @@ pub struct FinishParams {
     pub to_out: [[f32; 3]; 3],
     pub out_luma: [f32; 3],
     pub out_trc: OutputTrc,
+    /// Strength of the Vivid Red profile’s SDR highlight compression.
+    pub red_highlights: f32,
     /// Soft proofing (CPU only; the GPU path declines proof renders).
     pub proof: Option<crate::output::ProofParams>,
     pub hl: f32,
@@ -248,6 +250,11 @@ impl FinishParams {
             to_out: space.from_working(),
             out_luma: space.luma(),
             out_trc: space.trc(),
+            red_highlights: if peak <= 1.0 && s.profile.id == crate::profiles::VIVID_RED_ID {
+                (s.profile.amount / 100.0).clamp(0.0, 1.0) as f32
+            } else {
+                0.0
+            },
             proof: None,
             hl: (s.light.highlights / 100.0) as f32,
             sh: (s.light.shadows / 100.0) as f32,
@@ -478,7 +485,7 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
                 }
                 Some(pp) => {
                     let q0 = mul3(&pp.to_proof, d);
-                    let (q, t) = gamut_map_to(q0, pp.luma, peak);
+                    let (q, t) = map_output_gamut(q0, pp.luma, peak, fp.red_highlights);
                     if pp.dest_warning && out_of_gamut(q0, t) {
                         warn = Some(crate::output::PROOF_DEST_WARNING);
                     }
@@ -486,7 +493,9 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
                 }
                 None => mul3(to_out, d),
             };
-            let (mapped, t) = gamut_map_to(r, *out_luma, peak);
+            // A matrix proof already applied the compression in the proof primaries.
+            let strength = if fp.proof.as_ref().is_some_and(|pp| pp.table.is_none()) { 0.0 } else { fp.red_highlights };
+            let (mapped, t) = map_output_gamut(r, *out_luma, peak, strength);
             if fp.proof.as_ref().is_some_and(|pp| pp.display_warning) && warn.is_none() && out_of_gamut(r, t) {
                 warn = Some(crate::output::PROOF_DISPLAY_WARNING);
             }
@@ -704,6 +713,36 @@ fn mul3(m: &[[f32; 3]; 3], d: [f32; 3]) -> [f32; 3] {
     ]
 }
 
+/// Keep gamut warnings based on the uncompressed colour.
+#[inline]
+fn map_output_gamut(rgb: [f32; 3], luma: [f32; 3], peak: f32, strength: f32) -> ([f32; 3], f32) {
+    let (mapped, scale) = gamut_map_to(rgb, luma, peak);
+    (compress_red_highlights(rgb, mapped, strength), scale)
+}
+
+/// In intense reds, preserve channel ratios while rolling the red peak smoothly towards SDR
+/// white. The default luminance-based mapping still handles neutrals and other hues. The ramp
+/// starts below SDR white so the transition from midtones to highlights stays continuous.
+#[inline]
+fn compress_red_highlights(rgb: [f32; 3], mapped: [f32; 3], strength: f32) -> [f32; 3] {
+    let red = rgb[0];
+    if strength <= 0.0 || red <= 0.15 {
+        return mapped;
+    }
+    let other = rgb[1].max(rgb[2]).max(0.0);
+    let dominance = (red - other) / red;
+    let weight = strength * smooth(0.15, 0.45, red) * smooth(0.55, 0.90, dominance) * 0.90;
+    if weight <= 0.0 {
+        return mapped;
+    }
+    let knee = 0.88;
+    let headroom = 1.0 - knee;
+    let excess = (red - knee).max(0.0);
+    let compressed = red.min(knee) + headroom * excess / (headroom + excess);
+    let gain = compressed / red;
+    std::array::from_fn(|i| mapped[i] + (rgb[i].max(0.0) * gain - mapped[i]) * weight)
+}
+
 /// Desaturate linear `r` towards its luminance (weights `luma`) until every channel is in 0..1;
 /// returns the mapped colour and the chroma scale used (1 = already in gamut).
 #[inline]
@@ -785,6 +824,29 @@ fn enc(v: f32) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn red_highlight_compression_limits_the_blue_cast_and_keeps_tonal_steps() {
+        let luma = [0.2126, 0.7152, 0.0722];
+        let bright = [1.16, -0.04, 0.01];
+        let brighter = [1.35, -0.045, 0.011];
+        let (old, warning_scale) = gamut_map(bright, luma);
+        let (new, scale) = map_output_gamut(bright, luma, 1.0, 1.0);
+        let (next, _) = map_output_gamut(brighter, luma, 1.0, 1.0);
+        assert_eq!(warning_scale, scale);
+        assert!(new[2] < old[2]);
+        assert!(new[0] < next[0] && next[0] < 1.0);
+        assert!(new.into_iter().chain(next).all(|channel| (0.0..=1.0).contains(&channel)));
+        assert_eq!(map_output_gamut(bright, luma, 1.0, 0.0).0, old);
+    }
+
+    #[test]
+    fn red_highlight_compression_leaves_neutrals_greens_blues_and_dark_reds_alone() {
+        let luma = [0.2126, 0.7152, 0.0722];
+        for rgb in [[1.2; 3], [0.04, 1.2, -0.02], [-0.03, 0.15, 1.3], [0.12, -0.01, 0.01], [0.7, 0.56, 0.44]] {
+            assert_eq!(map_output_gamut(rgb, luma, 1.0, 1.0), gamut_map(rgb, luma));
+        }
+    }
+
     use super::*;
 
     #[test]

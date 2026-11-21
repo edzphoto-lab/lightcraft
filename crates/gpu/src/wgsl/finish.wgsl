@@ -287,6 +287,26 @@ fn gamut_apply(r: vec3<f32>, luma: vec3<f32>, tg: f32) -> vec3<f32> {
     return r;
 }
 
+// `finish::compress_red_highlights` (linear output RGB, SDR).
+fn compress_red_highlights(rgb: vec3<f32>, mapped: vec3<f32>, strength: f32) -> vec3<f32> {
+    let red = rgb.x;
+    if (strength <= 0.0 || red <= 0.15) {
+        return mapped;
+    }
+    let other = max(max(rgb.y, rgb.z), 0.0);
+    let dominance = (red - other) / red;
+    let weight = strength * smoothstep(0.15, 0.45, red) * smoothstep(0.55, 0.90, dominance) * 0.90;
+    if (weight <= 0.0) {
+        return mapped;
+    }
+    let knee = 0.88;
+    let headroom = 1.0 - knee;
+    let excess = max(red - knee, 0.0);
+    let compressed = min(red, knee) + headroom * excess / (headroom + excess);
+    let alternate = max(rgb, vec3<f32>(0.0)) * (compressed / red);
+    return mapped + (alternate - mapped) * weight;
+}
+
 // `finish::out_of_gamut`: `r` needed desaturating by `t` to fit and isn't just a neutral beyond white or below black.
 fn out_of_gamut(r: vec3<f32>, t: f32) -> bool {
     let lo = min(r.x, min(r.y, r.z));
@@ -523,7 +543,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (pu(F_PROOF_DEST_WARN) != 0u && out_of_gamut(q0, tq)) {
             warn = 1u;
         }
-        r = mul3(mat_at(F_PROOF_OUT), gamut_apply(q0, vec3<f32>(pf(F_PROOF_Y), pf(F_PROOF_Y + 1u), pf(F_PROOF_Y + 2u)), tq));
+        let q = gamut_apply(q0, vec3<f32>(pf(F_PROOF_Y), pf(F_PROOF_Y + 1u), pf(F_PROOF_Y + 2u)), tq);
+        r = mul3(mat_at(F_PROOF_OUT), compress_red_highlights(q0, q, pf(F_RED_HIGHLIGHTS)));
     } else {
         r = mul3(mat_at(F_OUT_M), d);
     }
@@ -532,7 +553,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (pu(F_PROOF) != 0u && pu(F_PROOF_DISP_WARN) != 0u && warn == 0u && out_of_gamut(r, tg)) {
         warn = 2u;
     }
-    r = gamut_apply(r, oy, tg);
+    // A matrix proof already applied the compression in the proof primaries.
+    let red_strength = select(pf(F_RED_HIGHLIGHTS), 0.0, pu(F_PROOF) != 0u);
+    r = compress_red_highlights(r, gamut_apply(r, oy, tg), red_strength);
 
     // --- encode, curves, grain
     var e = vec3<f32>(encode_srgb(r.x), encode_srgb(r.y), encode_srgb(r.z));

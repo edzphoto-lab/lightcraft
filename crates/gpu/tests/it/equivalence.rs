@@ -808,6 +808,27 @@ fn saturated(s: &mut DevelopSettings) {
 }
 
 #[test]
+fn vivid_red_highlights_match_cpu() {
+    if !gpu() {
+        return;
+    }
+    let mut source = Rgb32f::new(256, 64);
+    for (i, pixel) in source.data.iter_mut().enumerate() {
+        let exposure = 2.0 * (i % 256) as f32 / 255.0;
+        *pixel = [0.75 * exposure, 0.07 * exposure, 0.012 * exposure];
+    }
+    let source = Arc::new(source);
+    let info = SourceInfo { raw: true, ..Default::default() };
+    let req = RenderRequest::fit(256, 64);
+    let mut settings = DevelopSettings::default();
+    settings.profile.id = "lc.vivid".into();
+    let vivid = render(&source, &info, &settings, &req);
+    settings.profile.id = lightcraft_pipeline::profiles::VIVID_RED_ID.into();
+    assert_ne!(vivid.image.data, render(&source, &info, &settings, &req).image.data);
+    check("vivid red highlight ramp", &source, &info, &settings, &req);
+}
+
+#[test]
 fn output_spaces_match() {
     if !gpu() {
         return;

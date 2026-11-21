@@ -477,6 +477,7 @@ pub const PROFILES: &[ProfileInfo] = &[
     ProfileInfo { id: "lc.color", name: "Color", group: "Basic" },
     ProfileInfo { id: "lc.neutral", name: "Neutral", group: "Basic" },
     ProfileInfo { id: "lc.vivid", name: "Vivid", group: "Basic" },
+    ProfileInfo { id: crate::pipeline::profiles::VIVID_RED_ID, name: "Vivid Red", group: "Basic" },
     ProfileInfo { id: "lc.landscape", name: "Landscape", group: "Basic" },
     ProfileInfo { id: "lc.portrait", name: "Portrait", group: "Basic" },
     ProfileInfo { id: "lc.mono", name: "Monochrome", group: "Basic" },

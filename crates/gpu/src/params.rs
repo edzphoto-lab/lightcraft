@@ -73,6 +73,7 @@ const FIELDS: &[(&str, usize)] = &[
     ("OUT_Y", 3),
     ("OUT_TRC", 1),
     ("OUT_GAMMA", 1),
+    ("RED_HIGHLIGHTS", 1),
     // soft proofing (matrix proofs; `ProofParams`): working → proof RGB, its luma, proof → output, warnings
     ("PROOF", 1),
     ("PROOF_M", 9),
@@ -240,6 +241,7 @@ pub fn finish_block(fp: &FinishParams, masks: &[[f32; MASK_TERMS]], present: &Pr
     let (trc, gamma) = fp.out_trc.code();
     p.u("OUT_TRC", trc);
     p.f("OUT_GAMMA", gamma);
+    p.f("RED_HIGHLIGHTS", fp.red_highlights);
     if let Some(pp) = fp.proof.as_ref().filter(|pp| pp.table.is_none()) {
         p.b("PROOF", true);
         p.fs("PROOF_M", pp.to_proof.as_flattened());
