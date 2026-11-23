@@ -1,4 +1,4 @@
-use super::load::{load_vec, load_vec_pair, load_vec_reduced};
+use super::load::{load_path_bytes, load_vec_pair};
 use super::preview::{fit_box, fs_preview_loader, preview_orientation};
 use super::probe::probe_bytes;
 use super::{Arc, DenoiseSpec, FileLoader, FileProbe, Filter, PairLoader, ReducedLoader, fit};
@@ -74,7 +74,9 @@ pub fn fs_pair_loader() -> PairLoader {
 /// interactive loads (the loupe, exports) never wait — they are counted, so background work
 /// yields to them.
 pub fn fs_hooks() -> (FileLoader, FileProbe) {
-    let loader: FileLoader = Arc::new(|path: &str, max_edge: usize| fs_load(path, max_edge, |bytes| load_vec(bytes, max_edge)));
+    let loader: FileLoader = Arc::new(|path: &str, max_edge: usize| {
+        fs_load(path, max_edge, |bytes| load_path_bytes(path, bytes, max_edge, false).map(|(img, info, _)| (img, info)))
+    });
     let probe: FileProbe = Arc::new(|path: &str| {
         use std::io::Read;
         // one open, then everything from the open file: its size and modification time are not
@@ -92,9 +94,9 @@ pub fn fs_hooks() -> (FileLoader, FileProbe) {
     (loader, probe)
 }
 
-/// The filesystem [`ReducedLoader`]: [`load_vec_reduced`] of the file, gated like [`fs_hooks`]' loader.
+/// The filesystem [`ReducedLoader`], gated like [`fs_hooks`]' loader.
 pub fn fs_reduced_loader() -> ReducedLoader {
-    Arc::new(|path: &str, max_edge: usize| fs_load(path, max_edge, |bytes| load_vec_reduced(bytes, max_edge)))
+    Arc::new(|path: &str, max_edge: usize| fs_load(path, max_edge, |bytes| load_path_bytes(path, bytes, max_edge, true)))
 }
 
 /// Read `path` and `load` it, waiting on [`crate::memory::work_gate`] as [`fs_hooks`] explains.

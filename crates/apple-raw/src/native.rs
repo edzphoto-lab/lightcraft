@@ -8,7 +8,7 @@ use objc2::msg_send;
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::{AnyClass, AnyObject};
 use objc2_core_foundation::{CGRect, CGSize};
-use objc2_foundation::NSData;
+use objc2_foundation::{NSString, NSURL};
 
 #[link(name = "CoreImage", kind = "framework")]
 unsafe extern "C" {
@@ -62,15 +62,16 @@ pub fn available() -> bool {
     AnyClass::get(c"CIRAWFilter").is_some()
 }
 
-pub fn decode(bytes: &[u8], max_edge: usize) -> Result<(Rgb32f, usize), &'static str> {
+pub fn decode(path: &str, max_edge: usize) -> Result<(Rgb32f, usize), &'static str> {
     autoreleasepool(|_| {
         let raw_class = AnyClass::get(c"CIRAWFilter").ok_or("CIRAWFilter is unavailable")?;
         let context_class = AnyClass::get(c"CIContext").ok_or("CIContext is unavailable")?;
-        let data = NSData::with_bytes(bytes);
+        let url = NSURL::fileURLWithPath(&NSString::from_str(path));
         // SAFETY: the documented Core Image selectors and their argument/return encodings.
-        // The RAW filter keeps the input data alive and applies the file's EXIF orientation.
+        // Give the RAW filter the file URL so ImageIO can use the extension to select the camera
+        // decoder. Sniffing NEF data without a type hint can select the container's TIFF thumbnail.
         unsafe {
-            let raw: Option<Retained<AnyObject>> = msg_send![raw_class, filterWithImageData: &*data, identifierHint: null::<AnyObject>()];
+            let raw: Option<Retained<AnyObject>> = msg_send![raw_class, filterWithImageURL: &*url];
             let raw = raw.ok_or("Apple did not recognize the RAW data")?;
             let native: CGSize = msg_send![&raw, nativeSize];
             let edge = native.width.max(native.height);

@@ -11,5 +11,5 @@ workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 lightcraft-raster = { workspace = true }
 objc2 = { workspace = true }
-objc2-foundation = { workspace = true }
+objc2-foundation = { workspace = true, features = ["NSString", "NSURL"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFCGTypes", "objc2"] }

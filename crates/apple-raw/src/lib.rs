@@ -13,9 +13,8 @@ pub use native::{available, decode};
 #[ignore = "requires a Nikon D600 RAW fixture on a macOS host"]
 fn decodes_camera_raw() {
     let fixture = std::env::var_os("LIGHTCRAFT_APPLE_RAW_FIXTURE").expect("set LIGHTCRAFT_APPLE_RAW_FIXTURE");
-    let data = std::fs::read(fixture).unwrap();
-    let (image, native_edge) = decode(&data, 768).unwrap();
-    assert!(native_edge > 768, "unexpected native edge: {native_edge}");
+    let (image, native_edge) = decode(fixture.to_str().unwrap(), 768).unwrap();
+    assert!(native_edge >= 5900, "unexpected native edge: {native_edge}");
     let edge = image.width.max(image.height);
     assert!((640..=768).contains(&edge), "unexpected preview edge: {edge}");
     assert!(image.data.iter().flatten().all(|v| v.is_finite()));
