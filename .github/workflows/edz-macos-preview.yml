@@ -34,7 +34,7 @@ jobs:
       - name: Build versioned EdZ Lab DMG
         env:
           LIGHTCRAFT_EDZ_LAB: '1'
-          LIGHTCRAFT_VERSION: '0.17.9'
+          LIGHTCRAFT_VERSION: '0.17.10'
         run: bash packaging/macos/package.sh --arch x86_64
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

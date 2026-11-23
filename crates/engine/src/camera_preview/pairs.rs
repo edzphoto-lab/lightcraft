@@ -516,12 +516,59 @@ fn fit_partial_on(sensor: &Rgb32f, reference: &Rgb32f, edge_limit: Option<f32>, 
     let render = |matrix| partial_candidate(sensor, reference, edge_limit, highlights, &pairs, &bright, matrix);
     let ordinary = render(matrix);
     if matrix == Mat3::IDENTITY
-        && let Some(candidate) = fit_single_hue(&pairs).and_then(render)
+        && let Some(mut candidate) = fit_single_hue(&pairs).and_then(render)
         && ordinary.as_ref().is_none_or(|old| candidate.1 < old.1 && candidate.2 < old.2)
     {
+        if !highlights.dro {
+            candidate.0.tone = fit_single_hue_shoulder(&candidate.0, &bright);
+        }
         return Some(candidate.0);
     }
     ordinary.map(|candidate| candidate.0)
+}
+
+/// Fit the extrapolated highlights against bright JPEG pixels that did not define the knots.
+/// A single-colour light can top out far below neutral white in display luminance. Extrapolating
+/// all the way to white would push the brightest pixels out of gamut and bleach the hue.
+fn fit_single_hue_shoulder(look: &CameraLook, bright: &[Pair]) -> CameraTone {
+    let [last_scene, last_display] = look.tone.knots()[31];
+    let space = lightcraft_pipeline::OutputSpace::Srgb;
+    let matrix = space.from_working();
+    let gamut = |p: [f64; 3]| {
+        let srgb = matrix.map(|row| row.into_iter().zip(p).map(|(m, v)| m * v as f32).sum::<f32>());
+        lightcraft_pipeline::finish::gamut_map(srgb, space.luma()).0
+    };
+    let encode = |rgb: [f32; 3]| rgb.map(|v| v.max(0.0).powf(1.0 / 2.2));
+    let mut train = Vec::new();
+    let mut held = Vec::new();
+    for (i, (input, target)) in bright.iter().enumerate() {
+        let scene = look.matrix.apply(*input);
+        if luma(scene.map(|v| v.max(0.0))) > f64::from(last_scene) {
+            let pairs = if i % 3 == 0 { &mut held } else { &mut train };
+            pairs.push((scene, encode(gamut(*target))));
+        }
+    }
+    let error = |tone: &CameraTone, pairs: &[([f64; 3], [f32; 3])]| -> f64 {
+        let map = ToneMap::camera(tone, 0.0, 0.0, 0.0);
+        pairs
+            .iter()
+            .map(|&(x, target)| {
+                let p = displayed(x, &map);
+                let y = luma(p);
+                let max = p.into_iter().fold(0.0, f64::max);
+                let p = if max > 1.0 { p.map(|v| y + (v - y) * (1.0 - y) / (max - y)) } else { p };
+                encode(gamut(p)).into_iter().zip(target).map(|(v, t)| f64::from(v - t).powi(2)).sum::<f64>()
+            })
+            .sum()
+    };
+    if train.len() < 16 || held.len() < 8 {
+        return look.tone;
+    }
+    let best = (1..=64)
+        .filter_map(|i| look.tone.with_shoulder_limit(last_display + (1.0 - last_display) * (i as f32 / 64.0)))
+        .map(|tone| (error(&tone, &train), tone))
+        .min_by(|a, b| a.0.total_cmp(&b.0));
+    best.map(|(_, tone)| tone).filter(|tone| error(tone, &held) < 0.8 * error(&look.tone, &held)).unwrap_or(look.tone)
 }
 
 fn partial_candidate(

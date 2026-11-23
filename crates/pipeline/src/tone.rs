@@ -26,6 +26,8 @@ const NO_CHROMA: [f32; CHROMA_N] = [1.0; CHROMA_N];
 pub struct CameraTone {
     knots: [[f32; 2]; 32],
     chroma: [f32; CHROMA_N],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shoulder_limit: Option<f32>,
 }
 
 impl<'de> serde::Deserialize<'de> for CameraTone {
@@ -36,9 +38,15 @@ impl<'de> serde::Deserialize<'de> for CameraTone {
             // absent in smart previews written before the chroma curve existed
             #[serde(default)]
             chroma: Option<[f32; CHROMA_N]>,
+            #[serde(default)]
+            shoulder_limit: Option<f32>,
         }
         let w = Wire::deserialize(d)?;
         let tone = Self::new(w.knots).ok_or_else(|| serde::de::Error::custom("invalid camera tone curve"))?;
+        let tone = match w.shoulder_limit {
+            Some(limit) => tone.with_shoulder_limit(limit).ok_or_else(|| serde::de::Error::custom("invalid camera shoulder limit"))?,
+            None => tone,
+        };
         match w.chroma {
             Some(c) => tone.with_chroma(c).ok_or_else(|| serde::de::Error::custom("invalid camera chroma curve")),
             None => Ok(tone),
@@ -55,7 +63,7 @@ impl CameraTone {
             }
             previous = p;
         }
-        Some(Self { knots, chroma: NO_CHROMA })
+        Some(Self { knots, chroma: NO_CHROMA, shoulder_limit: None })
     }
 
     /// The curve with chroma scales at display luminance 0, 1/7 … 1 (each finite, 0..=4).
@@ -65,6 +73,11 @@ impl CameraTone {
 
     pub fn chroma(&self) -> &[f32; CHROMA_N] {
         &self.chroma
+    }
+
+    /// Shoulder level for the recorded highlights of a scene lit by one saturated colour.
+    pub fn with_shoulder_limit(self, limit: f32) -> Option<Self> {
+        (limit > self.knots[31][1] && limit <= 1.0).then_some(Self { shoulder_limit: Some(limit), ..self })
     }
 
     /// The (scene, display) luminance knots, in increasing order.
@@ -88,7 +101,13 @@ impl CameraTone {
         let b = self.knots[31];
         // Extend beyond observed (unclipped) highlights with a continuous, bounded shoulder.
         let slope = ((b[1] - a[1]) / (b[0] - a[0])).clamp(0.1, 16.0);
-        1.0 - (1.0 - b[1]) * (-(y - b[0]) * slope / (1.0 - b[1]).max(0.01)).exp()
+        let shoulder = |limit: f32| limit - (limit - b[1]) * (-(y - b[0]) * slope / (limit - b[1]).max(0.01)).exp();
+        let Some(limit) = self.shoulder_limit else { return shoulder(1.0) };
+        let limited = shoulder(limit);
+        // Leave room for exposure adjustments well above the fitted range. Blend two increasing
+        // shoulders with a rising weight on the brighter one, so the whole curve stays monotonic.
+        let restore = smooth(8.0, 32.0, y / b[0]);
+        limited + (shoulder(1.0) - limited) * restore
     }
 }
 
@@ -112,6 +131,7 @@ impl ToneMap {
     /// [`ToneMap::hdr`].
     pub fn camera_hdr(curve: &CameraTone, contrast: f64, whites: f64, blacks: f64, peak: f32) -> ToneMap {
         let peak = if peak.is_finite() { peak.max(1.0) } else { 1.0 };
+        let curve = if peak > 1.0 { CameraTone { shoulder_limit: None, ..*curve } } else { *curve };
         let adjustment = Self::display(contrast, whites, blacks);
         let neutral = contrast == 0.0 && whites == 0.0 && blacks == 0.0;
         let top = (2.9 - 1.6 * (whites as f32 / 100.0) + peak.log2() + 1.0).max(HDR_FROM_EV + 0.5);
@@ -296,6 +316,20 @@ mod tests {
         assert!(plain.with_chroma([-1.0; CHROMA_N]).is_none());
         let bad = serde_json::json!({ "knots": knots(), "chroma": [9.0, 1, 1, 1, 1, 1, 1, 1] });
         assert!(serde_json::from_value::<CameraTone>(bad).is_err());
+    }
+
+    #[test]
+    fn camera_shoulder_limit_preserves_knots_and_roundtrips() {
+        let knots = knots().map(|[x, y]| [x, y * 0.2]);
+        let plain = CameraTone::new(knots).unwrap();
+        let limited = plain.with_shoulder_limit(0.35).unwrap();
+        assert_eq!(limited.apply(knots[31][0]), plain.apply(knots[31][0]));
+        assert!(limited.apply(4.0 * knots[31][0]) <= 0.35);
+        assert_eq!(limited.apply(100.0), plain.apply(100.0));
+        assert!(limited.apply(2.0 * knots[31][0]) > knots[31][1]);
+        assert!(plain.with_shoulder_limit(knots[31][1]).is_none());
+        let json = serde_json::to_value(limited).unwrap();
+        assert_eq!(serde_json::from_value::<CameraTone>(json).unwrap(), limited);
     }
 
     #[test]
