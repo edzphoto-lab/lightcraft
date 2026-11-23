@@ -1794,6 +1794,30 @@ fn partial_look_when_a_lens_corrected_jpeg_misses_the_gates() {
     assert!(tone.apply(0.05) < tone.apply(0.2) && tone.apply(0.2) < tone.apply(0.8));
 }
 
+#[test]
+fn a_single_hue_can_be_calibrated_without_a_full_colour_matrix() {
+    use super::pairs::fit_single_hue;
+
+    let input = [2.6, 0.45, 0.18];
+    let target = [3.1, 0.24, 0.09];
+    let pairs: Vec<_> = (1..=300)
+        .map(|i| {
+            let level = f64::from(i) / 1000.0;
+            (input.map(|v| level * v), target.map(|v| level * v))
+        })
+        .collect();
+    let matrix = fit_single_hue(&pairs).unwrap();
+    for (got, want) in matrix.apply(input).into_iter().zip(target.map(|v| v * luma(input) / luma(target))) {
+        assert!((got - want).abs() < 1e-10);
+    }
+    for v in matrix.apply([0.25; 3]) {
+        assert!((v - 0.25).abs() < 1e-10, "neutral patch changed");
+    }
+    let mut mixed = pairs.clone();
+    mixed.extend((0..150).map(|_| ([0.1, 0.4, 0.1], [0.1, 0.5, 0.1])));
+    assert!(fit_single_hue(&mixed).is_none());
+}
+
 fn near_black_scene() -> (Rgb32f, Rgb32f) {
     let mut sensor = Rgb32f::new(96, 64);
     let mut reference = sensor.clone();

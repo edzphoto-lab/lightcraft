@@ -205,6 +205,57 @@ pub(super) fn fit_matrix(pairs: &[([f64; 3], [f64; 3])]) -> Option<Mat3> {
     matrix.0.iter().flatten().all(|v| v.is_finite() && v.abs() < 8.0).then_some(matrix)
 }
 
+/// A scene lit by one saturated colour can constrain a correction along that colour axis even
+/// when it cannot constrain a full matrix. Train a rank-one correction in chromaticity that
+/// leaves neutral colours and the perpendicular chroma direction unchanged.
+pub(super) fn fit_single_hue(pairs: &[Pair]) -> Option<Mat3> {
+    let chroma = |rgb: [f64; 3]| rgb.map(|v| v / luma(rgb) - 1.0);
+    let dot = |a: [f64; 3], b: [f64; 3]| a.into_iter().zip(b).map(|(x, y)| x * y).sum::<f64>();
+    let axis = |source: bool| {
+        let mut mean = [0.0; 3];
+        let mut count = 0;
+        for (i, (input, target)) in pairs.iter().enumerate() {
+            if i % 3 != 0 {
+                let c = chroma(if source { *input } else { *target });
+                for j in 0..3 {
+                    mean[j] += c[j];
+                }
+                count += 1;
+            }
+        }
+        let length = dot(mean, mean).sqrt();
+        (count > 0 && length > 0.6 * f64::from(count)).then(|| mean.map(|v| v / length))
+    };
+    let (input_axis, target_axis) = (axis(true)?, axis(false)?);
+    let mut agreement = 0;
+    let mut count = 0;
+    let mut energy = 0.0;
+    let mut delta = [0.0; 3];
+    let mean = input_axis.iter().sum::<f64>() / 3.0;
+    let projection = input_axis.map(|v| v - mean);
+    for (i, (input, target)) in pairs.iter().enumerate() {
+        if i % 3 == 0 {
+            continue;
+        }
+        let (x, y) = (chroma(*input), chroma(*target));
+        count += 1;
+        if dot(x, input_axis) < 0.98 * dot(x, x).sqrt() || dot(y, target_axis) < 0.98 * dot(y, y).sqrt() {
+            continue;
+        }
+        agreement += 1;
+        let strength = dot(x, projection);
+        energy += strength * strength;
+        for j in 0..3 {
+            delta[j] += strength * (y[j] - x[j]);
+        }
+    }
+    if agreement * 10 < count * 9 || energy <= f64::EPSILON {
+        return None;
+    }
+    let matrix = Mat3(std::array::from_fn(|r| std::array::from_fn(|c| Mat3::IDENTITY.0[r][c] + delta[r] / energy * projection[c])));
+    matrix.0.iter().flatten().all(|v| v.is_finite() && v.abs() < 2.0).then_some(matrix)
+}
+
 /// Neighbourhood luminance ratio above which a pixel counts as an edge for the second attempt
 /// of [`search_ordered`]. Camera JPEGs are often lens-corrected (Sony "Distortion Comp.: Auto",
 /// compacts and kit zooms): on a 51 mm ILCE-7RM2 shot of a glass façade the JPEG is up to 15 px
@@ -462,9 +513,29 @@ fn fit_partial_on(sensor: &Rgb32f, reference: &Rgb32f, edge_limit: Option<f32>, 
         })),
         None => Mat3::IDENTITY,
     };
-    let tone = fit_tone_with_shadows(ToneFit::Quantile, &pairs, sensor, reference, edge_limit, |x| matrix.apply(x))?;
+    let render = |matrix| partial_candidate(sensor, reference, edge_limit, highlights, &pairs, &bright, matrix);
+    let ordinary = render(matrix);
+    if matrix == Mat3::IDENTITY
+        && let Some(candidate) = fit_single_hue(&pairs).and_then(render)
+        && ordinary.as_ref().is_none_or(|old| candidate.1 < old.1 && candidate.2 < old.2)
+    {
+        return Some(candidate.0);
+    }
+    ordinary.map(|candidate| candidate.0)
+}
+
+fn partial_candidate(
+    sensor: &Rgb32f,
+    reference: &Rgb32f,
+    edge_limit: Option<f32>,
+    highlights: &HighlightCheck,
+    pairs: &[Pair],
+    bright: &[Pair],
+    matrix: Mat3,
+) -> Option<(CameraLook, f64, f64)> {
+    let tone = fit_tone_with_shadows(ToneFit::Quantile, pairs, sensor, reference, edge_limit, |x| matrix.apply(x))?;
     let mut look = CameraLook { matrix, tone, hue_sat: None };
-    if let Some(tone) = fit_chroma(&bright, &look) {
+    if let Some(tone) = fit_chroma(bright, &look) {
         look.tone = tone;
     }
     let (tone, neutral) = (ToneMap::camera(&look.tone, 0.0, 0.0, 0.0), ToneMap::new(0.0, 0.0, 0.0));
@@ -487,7 +558,7 @@ fn fit_partial_on(sensor: &Rgb32f, reference: &Rgb32f, edge_limit: Option<f32>, 
         eprintln!(
             "[profile] camera look partial (tone{}{}) holdout RMS {:.5} -> {:.5} ({samples} channels{})",
             if look.tone.chroma().iter().any(|k| *k != 1.0) { ", chroma" } else { "" },
-            if matrix != Mat3::IDENTITY { ", damped matrix" } else { "" },
+            if matrix != Mat3::IDENTITY { ", colour matrix" } else { "" },
             (before / samples.max(1) as f64).sqrt(),
             (after / samples.max(1) as f64).sqrt(),
             if edge_limit.is_some() { ", away from edges" } else { "" }
@@ -495,5 +566,5 @@ fn fit_partial_on(sensor: &Rgb32f, reference: &Rgb32f, edge_limit: Option<f32>, 
     }
     let better =
         after.is_finite() && after_encoded.is_finite() && after < before * MIN_IMPROVEMENT && after_encoded < before_encoded * MIN_IMPROVEMENT;
-    (samples > 0 && better).then_some(look)
+    (samples > 0 && better).then_some((look, after, after_encoded))
 }
