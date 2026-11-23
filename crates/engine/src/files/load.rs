@@ -30,7 +30,7 @@ pub(super) fn load_path_bytes(_path: &str, bytes: Vec<u8>, max_edge: usize, redu
     #[cfg(not(target_arch = "wasm32"))]
     let engine = super::active_raw_engine();
     #[cfg(not(target_arch = "wasm32"))]
-    if engine != super::RawEngine::LightCraft && lightcraft_raw::probe(&bytes).is_some() {
+    if engine != super::RawEngine::LightCraft && super::raw_engine::can_develop(engine, _path) && lightcraft_raw::probe(&bytes).is_some() {
         let probed = lightcraft_raw::probe_info(&bytes).ok();
         match super::raw_engine::develop(_path, max_edge) {
             Ok((img, native_long))

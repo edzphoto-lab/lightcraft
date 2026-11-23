@@ -142,6 +142,7 @@ pub struct AppSettings {
     pub raw_engine: Option<lightcraft_engine::files::RawEngine>,
     pub rawtherapee_path: String,
     pub libraw_path: String,
+    pub nikon_raw_path: String,
     /// Use Windows DirectComposition to prevent VRR flicker; applies at next launch.
     pub compose_window: bool,
     /// Largest long edge (pixels) the user lets the loupe render at; 0 = Automatic (the size it is
@@ -237,6 +238,7 @@ impl Default for AppSettings {
             raw_engine: None,
             rawtherapee_path: String::new(),
             libraw_path: String::new(),
+            nikon_raw_path: String::new(),
             compose_window: false,
             preview_limit: 0,
             external_editor: String::new(),
@@ -359,6 +361,7 @@ impl AppSettings {
         use lightcraft_engine::files::RawEngine;
         match self.raw_engine {
             Some(RawEngine::Apple) if !cfg!(target_os = "macos") => RawEngine::LightCraft,
+            Some(RawEngine::Nikon) if !RawEngine::nikon_platform_supported() => RawEngine::LightCraft,
             Some(engine) => engine,
             None if cfg!(target_os = "macos") && self.apple_raw => RawEngine::Apple,
             None => RawEngine::LightCraft,
@@ -371,6 +374,7 @@ impl AppSettings {
         match engine {
             RawEngine::RawTherapee => Some(&mut self.rawtherapee_path),
             RawEngine::LibRaw => Some(&mut self.libraw_path),
+            RawEngine::Nikon => Some(&mut self.nikon_raw_path),
             _ => None,
         }
     }
@@ -379,6 +383,7 @@ impl AppSettings {
         let path = match engine {
             RawEngine::RawTherapee => &self.rawtherapee_path,
             RawEngine::LibRaw => &self.libraw_path,
+            RawEngine::Nikon => &self.nikon_raw_path,
             _ => return None,
         };
         let path = path.trim();

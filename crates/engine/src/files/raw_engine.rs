@@ -9,15 +9,21 @@ pub enum RawEngine {
     Apple,
     RawTherapee,
     LibRaw,
+    Nikon,
 }
 
 impl RawEngine {
+    pub const fn nikon_platform_supported() -> bool {
+        cfg!(all(target_os = "macos", target_arch = "x86_64"))
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::LightCraft => "LightCraft",
             Self::Apple => "Apple Core Image",
             Self::RawTherapee => "RawTherapee",
             Self::LibRaw => "LibRaw",
+            Self::Nikon => "Nikon Image SDK",
         }
     }
 }
@@ -39,7 +45,7 @@ mod native {
     }
 
     static BACKEND: OnceLock<Backend> = OnceLock::new();
-    // Both converters can use multiple threads and allocate several full-size images at once.
+    // External converters can use multiple threads and allocate several full-size images at once.
     static EXTERNAL_RENDER: Mutex<()> = Mutex::new(());
 
     impl RawEngine {
@@ -47,9 +53,18 @@ mod native {
             match self {
                 Self::RawTherapee => Some(if cfg!(windows) { "rawtherapee-cli.exe" } else { "rawtherapee-cli" }),
                 Self::LibRaw => Some(if cfg!(windows) { "dcraw_emu.exe" } else { "dcraw_emu" }),
+                Self::Nikon if Self::nikon_platform_supported() => Some("nikon-nef"),
                 _ => None,
             }
         }
+    }
+
+    pub(in crate::files) fn can_develop(engine: RawEngine, path: &str) -> bool {
+        engine != RawEngine::Nikon
+            || Path::new(path)
+                .extension()
+                .and_then(std::ffi::OsStr::to_str)
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("nef") || ext.eq_ignore_ascii_case("nrw"))
     }
 
     fn executable(engine: RawEngine, explicit: Option<&Path>) -> Option<PathBuf> {
@@ -57,6 +72,11 @@ mod native {
             return std::path::absolute(path).ok().filter(|path| path.is_file());
         }
         let name = engine.executable_name()?;
+        if engine == RawEngine::Nikon {
+            return std::env::home_dir()
+                .map(|home| home.join("Library/Application Support/LightCraft/Nikon Converter.app/Contents/MacOS").join(name))
+                .filter(|candidate| candidate.is_file());
+        }
         let path = std::env::var_os("PATH").unwrap_or_default();
         std::env::split_paths(&path)
             .map(|directory| directory.join(name))
@@ -75,6 +95,7 @@ mod native {
         BACKEND.get_or_init(|| {
             let executable = executable(engine, explicit);
             let engine = match engine {
+                RawEngine::Nikon if !RawEngine::nikon_platform_supported() => RawEngine::LightCraft,
                 RawEngine::Apple if !apple_available() => RawEngine::LightCraft,
                 engine if engine.executable_name().is_some() && executable.is_none() => {
                     log::warn!("{engine:?} executable not found; using LightCraft");
@@ -85,7 +106,7 @@ mod native {
             let cache_tag = match engine {
                 RawEngine::LightCraft => 0,
                 RawEngine::Apple => 1,
-                RawEngine::RawTherapee | RawEngine::LibRaw => {
+                RawEngine::RawTherapee | RawEngine::LibRaw | RawEngine::Nikon => {
                     // Include the installation identity to invalidate a render after changing the executable.
                     let mut hash = std::collections::hash_map::DefaultHasher::new();
                     engine.executable_name().hash(&mut hash);
@@ -141,6 +162,9 @@ mod native {
                 // As-shot WB and an sRGB 16-bit TIFF. An explicit basename confines output to the temporary folder.
                 command.args(["-w", "-o", "1", "-g", "2.4", "12.92", "-6", "-T", "-Z", "developed.tif"]).arg(&source);
             }
+            RawEngine::Nikon => {
+                command.arg(&source).arg(&output);
+            }
             _ => return Err("selected RAW engine is unavailable".into()),
         }
         let status = {
@@ -160,6 +184,20 @@ mod native {
         Ok((image.into_oriented(orientation), native_long))
     }
 
+    #[cfg(test)]
+    mod tests {
+        use super::{RawEngine, can_develop};
+
+        #[test]
+        fn nikon_only_receives_nikon_extensions() {
+            assert!(can_develop(RawEngine::Nikon, "/Photos/DSC_2953.NEF"));
+            assert!(can_develop(RawEngine::Nikon, "/Photos/compact.nRw"));
+            assert!(!can_develop(RawEngine::Nikon, "/Photos/IMG_8304.CR3"));
+            assert!(!can_develop(RawEngine::Nikon, "/Photos/IMG_8304"));
+            assert!(can_develop(RawEngine::LibRaw, "/Photos/IMG_8304.CR3"));
+        }
+    }
+
     fn wait(child: &mut Child, timeout: Duration) -> std::io::Result<ExitStatus> {
         let start = Instant::now();
         let result = loop {
@@ -177,9 +215,9 @@ mod native {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) use native::develop;
-#[cfg(not(target_arch = "wasm32"))]
 pub use native::{active_raw_engine, configure_raw_engine, raw_engine_cache_tag};
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) use native::{can_develop, develop};
 #[cfg(target_arch = "wasm32")]
 pub const fn raw_engine_cache_tag() -> u32 {
     0

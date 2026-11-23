@@ -160,6 +160,7 @@ fn main() -> ExitCode {
         Ok("apple") => RawEngine::Apple,
         Ok("rawtherapee") => RawEngine::RawTherapee,
         Ok("libraw") => RawEngine::LibRaw,
+        Ok("nikon") => RawEngine::Nikon,
         _ => RawEngine::LightCraft,
     };
     let executable = std::env::var_os("LIGHTCRAFT_RAW_ENGINE_PATH").map(std::path::PathBuf::from);

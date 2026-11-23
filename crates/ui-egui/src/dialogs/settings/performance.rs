@@ -19,6 +19,8 @@ pub(super) fn performance_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &To
             (RawEngine::LightCraft, "LightCraft"),
             (RawEngine::RawTherapee, "RawTherapee"),
             (RawEngine::LibRaw, "LibRaw 0.22"),
+            #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+            (RawEngine::Nikon, "Nikon Image SDK"),
         ];
         if row(ui, t, crate::i18n::tr("RAW engine"), |ui| choices(ui, "settingsRawEngine", &options, &mut engine)) {
             settings.raw_engine = Some(engine);

@@ -42,7 +42,7 @@ jobs:
       - name: Build versioned EdZ Lab DMG
         env:
           LIGHTCRAFT_EDZ_LAB: '1'
-          LIGHTCRAFT_VERSION: '0.17.12'
+          LIGHTCRAFT_VERSION: '0.17.13'
         run: bash packaging/macos/package.sh --arch x86_64
       - name: Verify built-in RAW engines on macOS
         run: |
