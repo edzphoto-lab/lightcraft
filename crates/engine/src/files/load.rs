@@ -63,7 +63,8 @@ fn load_bytes_now(
     if lightcraft_raw::probe(&bytes).is_some() {
         #[cfg(target_os = "macos")]
         if denoise.is_none() && super::apple_raw_enabled() {
-            if let Some((img, mut info)) = super::apple_raw::decode(&bytes, max_edge) {
+            if let Some((img, native_long)) = lightcraft_apple_raw::decode(&bytes, max_edge) {
+                let mut info = SourceInfo { raw: true, apple_raw: true, relative_wb: true, native_long: Some(native_long), ..SourceInfo::default() };
                 if let Ok(raw) = lightcraft_raw::probe_info(&bytes) {
                     // Keep existing white-balance recipes on their original scale. Apple delivers
                     // as-shot pixels, so further WB changes adapt those pixels in the pipeline.

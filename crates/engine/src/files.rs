@@ -13,9 +13,6 @@ use lightcraft_raster::resample::{Filter, fit};
 
 use crate::media::{DenoiseSpec, FileLoader, FileProbe, PairLoader, PreviewLoader, ProbeInfo, ReducedLoader};
 
-#[cfg(target_os = "macos")]
-#[allow(unsafe_code)]
-mod apple_raw;
 mod colour;
 mod fs;
 mod load;
@@ -47,7 +44,7 @@ static APPLE_RAW: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 /// takes effect at the next launch so in-flight jobs cannot mix results from the two decoders.
 #[cfg(target_os = "macos")]
 pub fn configure_apple_raw(enabled: bool) {
-    let _ = APPLE_RAW.set(enabled && apple_raw::available());
+    let _ = APPLE_RAW.set(enabled && lightcraft_apple_raw::available());
 }
 
 /// The active decoder preference. Other platforms always use LightCraft's decoder.

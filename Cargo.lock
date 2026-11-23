@@ -3562,6 +3562,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lightcraft-apple-raw"
+version = "0.17.0"
+dependencies = [
+ "lightcraft-raster",
+ "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
 name = "lightcraft-catalog"
 version = "0.17.0"
 dependencies = [
@@ -3694,6 +3704,7 @@ dependencies = [
  "harfrust 0.13.3",
  "jxl-oxide",
  "libc",
+ "lightcraft-apple-raw",
  "lightcraft-catalog",
  "lightcraft-codecs",
  "lightcraft-color",
@@ -3720,9 +3731,6 @@ dependencies = [
  "lightcraft-tiff",
  "log",
  "miniz_oxide 0.9.1",
- "objc2 0.6.5",
- "objc2-core-foundation",
- "objc2-foundation 0.3.2",
  "rayon",
  "serde",
  "serde_json",

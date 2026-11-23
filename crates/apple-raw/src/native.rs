@@ -3,7 +3,6 @@
 use std::ffi::c_void;
 use std::ptr::{NonNull, null};
 
-use lightcraft_pipeline::SourceInfo;
 use lightcraft_raster::Rgb32f;
 use objc2::msg_send;
 use objc2::rc::{Retained, autoreleasepool};
@@ -57,13 +56,13 @@ impl Drop for OwnedCf {
     }
 }
 
-pub(super) fn available() -> bool {
+pub fn available() -> bool {
     // Looking up the class rather than referencing its symbol permits macOS 11 to use the
     // LightCraft decoder. CIRAWFilter is available from macOS 12.
     AnyClass::get(c"CIRAWFilter").is_some()
 }
 
-pub(super) fn decode(bytes: &[u8], max_edge: usize) -> Option<(Rgb32f, SourceInfo)> {
+pub fn decode(bytes: &[u8], max_edge: usize) -> Option<(Rgb32f, usize)> {
     autoreleasepool(|_| {
         let raw_class = AnyClass::get(c"CIRAWFilter")?;
         let context_class = AnyClass::get(c"CIContext")?;
@@ -99,7 +98,7 @@ pub(super) fn decode(bytes: &[u8], max_edge: usize) -> Option<(Rgb32f, SourceInf
             if rgb.width.max(rgb.height) > max_edge {
                 rgb = lightcraft_raster::resample::fit(&rgb, max_edge, max_edge, lightcraft_raster::resample::Filter::Box);
             }
-            Some((rgb, SourceInfo { raw: true, apple_raw: true, relative_wb: true, native_long: Some(native_long), ..SourceInfo::default() }))
+            Some((rgb, native_long))
         }
     })
 }
