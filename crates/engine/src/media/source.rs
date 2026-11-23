@@ -3,6 +3,11 @@ use super::{Arc, Deserialize, DevelopSettings, MediaKind, Photo, Rgb32f, Rgba8, 
 /// Bump when the pipeline's output changes, to invalidate cached thumbnails.
 pub const RENDER_CACHE_VERSION: u64 = 74;
 
+/// Apple and LightCraft develop the same original differently. Keep their rendered caches apart.
+pub fn render_cache_version() -> u64 {
+    RENDER_CACHE_VERSION | (u64::from(crate::files::apple_raw_enabled()) << 32)
+}
+
 /// Thumbnails render at one of these long edges (so window/cell size changes reuse the cache).
 pub const THUMB_SIZES: [usize; 4] = [128, 256, 384, 512];
 

@@ -140,6 +140,8 @@ fn library_error(dir: &str, e: lightcraft_engine::EngineError) -> String {
 }
 
 fn main() -> ExitCode {
+    #[cfg(target_os = "macos")]
+    lightcraft_engine::files::configure_apple_raw(std::env::var("LIGHTCRAFT_RAW_ENGINE").as_deref() == Ok("apple"));
     // `--features dhat-heap`: count allocations; the profile is written when `_heap` drops
     // (LIGHTCRAFT_DHAT_FILE, default dhat-heap.json).
     #[cfg(feature = "dhat-heap")]

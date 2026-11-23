@@ -13,6 +13,9 @@ use lightcraft_raster::resample::{Filter, fit};
 
 use crate::media::{DenoiseSpec, FileLoader, FileProbe, PairLoader, PreviewLoader, ProbeInfo, ReducedLoader};
 
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+mod apple_raw;
 mod colour;
 mod fs;
 mod load;
@@ -36,6 +39,26 @@ use probe::{meta_of, preview_reason};
 
 /// Sensor clip level (normalised) for highlight reconstruction.
 const HIGHLIGHT_CLIP: f32 = 0.99;
+
+#[cfg(target_os = "macos")]
+static APPLE_RAW: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Set the desktop app's RAW decoder before any source or cache is opened. A preference change
+/// takes effect at the next launch so in-flight jobs cannot mix results from the two decoders.
+#[cfg(target_os = "macos")]
+pub fn configure_apple_raw(enabled: bool) {
+    let _ = APPLE_RAW.set(enabled && apple_raw::available());
+}
+
+/// The active decoder preference. Other platforms always use LightCraft's decoder.
+pub fn apple_raw_enabled() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        return APPLE_RAW.get().copied().unwrap_or(false);
+    }
+    #[cfg(not(target_os = "macos"))]
+    false
+}
 
 /// How a raw's camera RGB becomes the linear Rec.2020 the pipeline takes.
 pub(crate) struct CameraColourModel<'a> {

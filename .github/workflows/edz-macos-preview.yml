@@ -34,8 +34,19 @@ jobs:
       - name: Build versioned EdZ Lab DMG
         env:
           LIGHTCRAFT_EDZ_LAB: '1'
-          LIGHTCRAFT_VERSION: '0.17.10'
+          LIGHTCRAFT_VERSION: '0.17.11'
         run: bash packaging/macos/package.sh --arch x86_64
+      - name: Verify both RAW engines on macOS
+        run: |
+          set -euo pipefail
+          cli=target/x86_64-apple-darwin/release/lightcraft-cli
+          test_dir="$(mktemp -d)"
+          "$cli" synth-merge hdr -o "$test_dir"
+          LIGHTCRAFT_RAW_ENGINE=apple LIGHTCRAFT_LOG=debug "$cli" render "$test_dir/bracket-1.dng" -o "$test_dir/apple.tif" --size 768 --opt bitDepth=16 2>&1 | tee "$test_dir/apple.log"
+          grep -F 'Developed RAW with Apple Core Image' "$test_dir/apple.log"
+          LIGHTCRAFT_RAW_ENGINE=lightcraft "$cli" render "$test_dir/bracket-1.dng" -o "$test_dir/lightcraft.tif" --size 768 --opt bitDepth=16
+          test -s "$test_dir/apple.tif"
+          test -s "$test_dir/lightcraft.tif"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: LightCraft-EdZ-Lab-macOS-Intel

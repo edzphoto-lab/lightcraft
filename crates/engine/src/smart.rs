@@ -90,6 +90,8 @@ pub(crate) const ENCODE_VERSION: u64 = 3;
 #[derive(serde::Serialize, serde::Deserialize)]
 struct SmartFacts {
     raw: bool,
+    #[serde(default)]
+    apple_raw: bool,
     as_shot_temp: f64,
     as_shot_tint: f64,
     relative_wb: bool,
@@ -190,6 +192,7 @@ pub fn encode(img: &Rgb32f, info: Option<&SourceInfo>) -> Result<Vec<u8>, String
             .unwrap_or_default();
         let facts = SmartFacts {
             raw: i.raw,
+            apple_raw: i.apple_raw,
             as_shot_temp: i.as_shot_temp,
             as_shot_tint: i.as_shot_tint,
             relative_wb: i.relative_wb,
@@ -237,6 +240,7 @@ pub fn decode(bytes: &[u8]) -> Result<(Rgb32f, Option<CameraTone>, Option<Source
     img.data.iter_mut().for_each(|c| *c = c.map(|v| v * scale));
     let info = stored_facts(&head, bytes).map(|(f, mattes)| SourceInfo {
         raw: f.raw,
+        apple_raw: f.apple_raw,
         as_shot_temp: f.as_shot_temp,
         as_shot_tint: f.as_shot_tint,
         relative_wb: f.relative_wb,

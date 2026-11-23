@@ -1,6 +1,6 @@
 use super::quick::{QuickJob, content_key, source_info};
 use super::render::{RenderJob, RenderResult};
-use super::source::{PreviewLoader, RENDER_CACHE_VERSION, SourceLevel, SourceRef, THUMB_SIZES, face_edge, source_edge_needed, thumb_bucket};
+use super::source::{PreviewLoader, SourceLevel, SourceRef, THUMB_SIZES, face_edge, render_cache_version, source_edge_needed, thumb_bucket};
 use super::{Arc, DevelopSettings, Hash128, Hasher128, MediaKind, Op, Photo, PhotoId, RenderRequest, Rendered, Rgb32f, Source, SourceInfo};
 
 impl crate::Session {
@@ -62,7 +62,7 @@ impl crate::Session {
             ^ salt;
         let cache = thumb_bucket.map(|b| {
             let mut k = Hasher128::new();
-            k.str(&content_key).u64(settings_hash).u64(b as u64).u64(RENDER_CACHE_VERSION).u64(crate::camera_profiles::cache_key());
+            k.str(&content_key).u64(settings_hash).u64(b as u64).u64(render_cache_version()).u64(crate::camera_profiles::cache_key());
             // (only a render that uses a denoised picture has it in its key, so every other thumbnail stays valid)
             if salt != 0 {
                 k.u64(salt);
@@ -107,7 +107,7 @@ impl crate::Session {
             .str("variant")
             .u64(settings.hash64())
             .u64(edge as u64)
-            .u64(RENDER_CACHE_VERSION)
+            .u64(render_cache_version())
             .u64(crate::camera_profiles::cache_key())
             .finish()
     }
@@ -223,7 +223,7 @@ impl crate::Session {
             .str("view")
             .u64(p.develop.hash64())
             .u64(apply_crop as u64)
-            .u64(RENDER_CACHE_VERSION)
+            .u64(render_cache_version())
             .u64(crate::camera_profiles::cache_key())
             .finish()
     }

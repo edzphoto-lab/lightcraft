@@ -1221,6 +1221,8 @@
   "Rename Version": "Renommer la version",
   "Rename…": "Renommer…",
   "Rendering": "Rendu",
+  "RAW engine": "Moteur RAW",
+  "Applies at next launch. LightCraft opens RAW files Apple cannot develop.": "Prend effet au prochain lancement. LightCraft ouvre les fichiers RAW qu’Apple ne peut pas développer.",
   "Rendering…": "Rendu en cours…",
   "Reorder Masks": "Réorganiser les masques",
   "Reset": "Réinitialiser",

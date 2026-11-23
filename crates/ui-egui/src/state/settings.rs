@@ -136,6 +136,8 @@ pub struct AppSettings {
     pub import_dropped_directly: bool,
     /// GPU rendering allowed (`app.gpu`).
     pub gpu: bool,
+    /// Prefer the macOS RAW decoder. Read before any image is opened at launch.
+    pub apple_raw: bool,
     /// Use Windows DirectComposition to prevent VRR flicker; applies at next launch.
     pub compose_window: bool,
     /// Largest long edge (pixels) the user lets the loupe render at; 0 = Automatic (the size it is
@@ -227,6 +229,7 @@ impl Default for AppSettings {
             close_dialogs_outside: false,
             import_dropped_directly: false,
             gpu: true,
+            apple_raw: true,
             compose_window: false,
             preview_limit: 0,
             external_editor: String::new(),

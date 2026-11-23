@@ -8,6 +8,13 @@ use super::{CACHE_SIZES, LABEL_W, LightcraftApp, PREVIEW_LIMITS, RichText, Token
 pub(super) fn performance_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
     use lightcraft_engine::gpu;
     heading(ui, t, crate::i18n::tr("Rendering"));
+    #[cfg(target_os = "macos")]
+    {
+        row(ui, t, crate::i18n::tr("RAW engine"), |ui| {
+            choices(ui, "settingsRawEngine", &[(true, "Apple Core Image RAW"), (false, "LightCraft")], &mut app.ui.settings.apple_raw);
+        });
+        hint(ui, t, crate::i18n::tr("Applies at next launch. LightCraft opens RAW files Apple cannot develop."));
+    }
     #[cfg(target_os = "windows")]
     check(ui, "settings.composeWindow", &mut app.ui.settings.compose_window, "Prevent G-SYNC/FreeSync flicker (applies at next launch)");
     check(ui, "settings.gpu", &mut app.ui.settings.gpu, "Use the GPU for rendering");
