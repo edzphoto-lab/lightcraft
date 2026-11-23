@@ -3734,6 +3734,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "unicode-segmentation",
  "web-time",

@@ -42,9 +42,9 @@ jobs:
       - name: Build versioned EdZ Lab DMG
         env:
           LIGHTCRAFT_EDZ_LAB: '1'
-          LIGHTCRAFT_VERSION: '0.17.11'
+          LIGHTCRAFT_VERSION: '0.17.12'
         run: bash packaging/macos/package.sh --arch x86_64
-      - name: Verify both RAW engines on macOS
+      - name: Verify built-in RAW engines on macOS
         run: |
           set -euo pipefail
           cli=target/x86_64-apple-darwin/release/lightcraft-cli
@@ -55,6 +55,34 @@ jobs:
           LIGHTCRAFT_RAW_ENGINE=lightcraft "$cli" render "$fixture" -o "$test_dir/lightcraft.tif" --size 768 --opt bitDepth=16
           test -s "$test_dir/apple.tif"
           test -s "$test_dir/lightcraft.tif"
+      - name: Verify external RAW engines on macOS
+        run: |
+          set -euo pipefail
+          cli="$PWD/target/x86_64-apple-darwin/release/lightcraft-cli"
+          fixture="$RUNNER_TEMP/d600.nef"
+          test_dir="$(mktemp -d)"
+          cd "$test_dir"
+          curl -fSL --retry 2 --max-time 120 'https://www.libraw.org/data/LibRaw-0.22.3-macOS.zip' -o libraw.zip
+          printf '%s  %s\n' 1edd33c66be1cfdc74e0a471c4143d25f0172234a46a44dce5511a396a35af55 libraw.zip | shasum -a 256 -c -
+          unzip -q libraw.zip '*/bin/dcraw_emu'
+          LIGHTCRAFT_RAW_ENGINE=libraw LIGHTCRAFT_RAW_ENGINE_PATH="$test_dir/LibRaw-0.22.3/bin/dcraw_emu" LIGHTCRAFT_LOG=debug \
+            "$cli" render "$fixture" -o "$test_dir/libraw.tif" --size 768 --opt bitDepth=16 2>&1 | tee libraw.log
+          grep -F 'Developed RAW with LibRaw' libraw.log
+          test -s libraw.tif
+          # 5.12 supports the Intel macOS 15 runner. The CLI loads libraries from the installed app.
+          curl -fSL --retry 2 --max-time 180 'https://github.com/RawTherapee/RawTherapee/releases/download/5.12/RawTherapee_macOS_15.4_Universal_5.12.zip' -o rawtherapee.zip
+          printf '%s  %s\n' 2f284d1c023f53f0c492aecc3f7635d6b7807ef22d5413ee55715d81e81fe688 rawtherapee.zip | shasum -a 256 -c -
+          unzip -q rawtherapee.zip
+          rt="$test_dir/RawTherapee_macOS_15.4_Universal_5.12_folder"
+          mount="$test_dir/rawtherapee-volume"
+          mkdir "$mount"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "$rt/RawTherapee_macOS_15.4_Universal_5.12.dmg"
+          trap 'hdiutil detach "$mount"' EXIT
+          ditto "$mount/RawTherapee.app" /Applications/RawTherapee.app
+          LIGHTCRAFT_RAW_ENGINE=rawtherapee LIGHTCRAFT_RAW_ENGINE_PATH="$rt/rawtherapee-cli" LIGHTCRAFT_LOG=debug \
+            "$cli" render "$fixture" -o "$test_dir/rawtherapee.tif" --size 768 --opt bitDepth=16 2>&1 | tee rawtherapee.log
+          grep -F 'Developed RAW with RawTherapee' rawtherapee.log
+          test -s rawtherapee.tif
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: LightCraft-EdZ-Lab-macOS-Intel

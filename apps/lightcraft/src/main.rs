@@ -221,8 +221,12 @@ fn main() -> eframe::Result {
     let env_library: Option<std::path::PathBuf> = std::env::var_os("LIGHTCRAFT_LIBRARY").filter(|p| !p.is_empty()).map(Into::into);
     let (library_dir, opened_by_argument) = launch_library_choice(library_dir, env_library.as_ref(), launch_library);
     let (prefs, prefs_warning, keep_prefs_file) = load_prefs(in_memory);
-    #[cfg(target_os = "macos")]
-    lightcraft_engine::files::configure_apple_raw(prefs.as_ref().is_none_or(|ui| ui.settings.apple_raw));
+    use lightcraft_engine::files::RawEngine;
+    let engine = prefs
+        .as_ref()
+        .map_or(if cfg!(target_os = "macos") { RawEngine::Apple } else { RawEngine::LightCraft }, |ui| ui.settings.preferred_raw_engine());
+    let executable = prefs.as_ref().and_then(|ui| ui.settings.raw_engine_path(engine));
+    lightcraft_engine::files::configure_raw_engine(engine, executable);
     // the saved language from the start, so a failed start is reported in it too
     if let Some(ui) = &prefs {
         lightcraft_ui_egui::i18n::set_language(ui.language);

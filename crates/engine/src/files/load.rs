@@ -25,12 +25,14 @@ pub fn load_vec_reduced(bytes: Vec<u8>, max_edge: usize) -> Result<(Rgb32f, Sour
     rayon::scope(move |_| load_bytes_now(std::borrow::Cow::Owned(bytes), max_edge, None, true).map(|(img, _, info, reduced)| (img, info, reduced)))
 }
 
-/// Load a native file, giving Apple the original URL as well as LightCraft's usual bytes.
+/// Load a native file, giving the selected developer the original path as well as LightCraft's usual bytes.
 pub(super) fn load_path_bytes(_path: &str, bytes: Vec<u8>, max_edge: usize, reduced: bool) -> Result<(Rgb32f, SourceInfo, bool), String> {
-    #[cfg(target_os = "macos")]
-    if super::apple_raw_enabled() && lightcraft_raw::probe(&bytes).is_some() {
+    #[cfg(not(target_arch = "wasm32"))]
+    let engine = super::active_raw_engine();
+    #[cfg(not(target_arch = "wasm32"))]
+    if engine != super::RawEngine::LightCraft && lightcraft_raw::probe(&bytes).is_some() {
         let probed = lightcraft_raw::probe_info(&bytes).ok();
-        match lightcraft_apple_raw::decode(_path, max_edge) {
+        match super::raw_engine::develop(_path, max_edge) {
             Ok((img, native_long))
                 if probed.as_ref().is_none_or(|raw| {
                     let (w, h) = raw.developed_size();
@@ -38,20 +40,21 @@ pub(super) fn load_path_bytes(_path: &str, bytes: Vec<u8>, max_edge: usize, redu
                     native_long >= w.max(h) / 2
                 }) =>
             {
-                let mut info = SourceInfo { raw: true, apple_raw: true, relative_wb: true, native_long: Some(native_long), ..SourceInfo::default() };
+                let mut info =
+                    SourceInfo { raw: true, rendered_raw: true, relative_wb: true, native_long: Some(native_long), ..SourceInfo::default() };
                 if let Some(raw) = probed {
-                    // Keep existing white-balance recipes on their original scale. Apple delivers
+                    // Keep existing white-balance recipes on their original scale. External developers deliver
                     // as-shot pixels, so further WB changes adapt those pixels in the pipeline.
                     let scale = WbScaleOf::new(raw.format, &raw.color, raw.wb_multipliers, &raw.metadata);
                     (info.as_shot_temp, info.as_shot_tint) = scale.as_shot(lightcraft_raw::color::as_shot_white_xy_of(&raw));
                     info.relative_wb = scale.relative;
                     info.legacy_relative_wb = scale.legacy_relative;
                 }
-                log::debug!("Developed RAW with Apple Core Image");
+                log::debug!("Developed RAW with {}", engine.label());
                 return Ok((img, info, false));
             }
-            Ok(_) => log::debug!("Apple returned a RAW thumbnail; using LightCraft"),
-            Err(why) => log::debug!("Apple Core Image RAW could not develop the file ({why}); using LightCraft"),
+            Ok(_) => log::debug!("{engine:?} returned a RAW thumbnail; using LightCraft"),
+            Err(why) => log::debug!("{engine:?} could not develop the file ({why}); using LightCraft"),
         }
     }
     if reduced { load_vec_reduced(bytes, max_edge) } else { load_vec(bytes, max_edge).map(|(img, info)| (img, info, false)) }
@@ -223,7 +226,7 @@ fn load_bytes_now(
             twin,
             SourceInfo {
                 raw: true,
-                apple_raw: false,
+                rendered_raw: false,
                 as_shot_temp: temp,
                 as_shot_tint: tint,
                 lens,

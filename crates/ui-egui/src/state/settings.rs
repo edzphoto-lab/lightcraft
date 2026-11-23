@@ -136,8 +136,12 @@ pub struct AppSettings {
     pub import_dropped_directly: bool,
     /// GPU rendering allowed (`app.gpu`).
     pub gpu: bool,
-    /// Prefer the macOS RAW decoder. Read before any image is opened at launch.
+    /// The old macOS preference, used when migrating existing settings.
     pub apple_raw: bool,
+    #[serde(deserialize_with = "lenient")]
+    pub raw_engine: Option<lightcraft_engine::files::RawEngine>,
+    pub rawtherapee_path: String,
+    pub libraw_path: String,
     /// Use Windows DirectComposition to prevent VRR flicker; applies at next launch.
     pub compose_window: bool,
     /// Largest long edge (pixels) the user lets the loupe render at; 0 = Automatic (the size it is
@@ -230,6 +234,9 @@ impl Default for AppSettings {
             import_dropped_directly: false,
             gpu: true,
             apple_raw: true,
+            raw_engine: None,
+            rawtherapee_path: String::new(),
+            libraw_path: String::new(),
             compose_window: false,
             preview_limit: 0,
             external_editor: String::new(),
@@ -348,6 +355,36 @@ pub const LOUPE_EDGE_STEP: usize = 64;
 pub const STANDARD_PREVIEW_EDGE: u32 = 2560;
 
 impl AppSettings {
+    pub fn preferred_raw_engine(&self) -> lightcraft_engine::files::RawEngine {
+        use lightcraft_engine::files::RawEngine;
+        match self.raw_engine {
+            Some(RawEngine::Apple) if !cfg!(target_os = "macos") => RawEngine::LightCraft,
+            Some(engine) => engine,
+            None if cfg!(target_os = "macos") && self.apple_raw => RawEngine::Apple,
+            None => RawEngine::LightCraft,
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn raw_engine_path_mut(&mut self, engine: lightcraft_engine::files::RawEngine) -> Option<&mut String> {
+        use lightcraft_engine::files::RawEngine;
+        match engine {
+            RawEngine::RawTherapee => Some(&mut self.rawtherapee_path),
+            RawEngine::LibRaw => Some(&mut self.libraw_path),
+            _ => None,
+        }
+    }
+    pub fn raw_engine_path(&self, engine: lightcraft_engine::files::RawEngine) -> Option<&std::path::Path> {
+        use lightcraft_engine::files::RawEngine;
+        let path = match engine {
+            RawEngine::RawTherapee => &self.rawtherapee_path,
+            RawEngine::LibRaw => &self.libraw_path,
+            _ => return None,
+        };
+        let path = path.trim();
+        (!path.is_empty()).then(|| std::path::Path::new(path))
+    }
+
     /// The theme to show: the light theme in Light mode, or in Auto when `system` is light; the
     /// dark theme otherwise (Auto with no answer from the system included).
     pub fn theme(&self, system: Option<egui::Theme>) -> crate::theme::ThemeKind {
@@ -440,6 +477,26 @@ fn deserialize_favorite_themes<'de, D: serde::Deserializer<'de>>(d: D) -> Result
         }
     }
     Ok(values)
+}
+
+#[cfg(test)]
+mod raw_engine_tests {
+    use super::AppSettings;
+    use lightcraft_engine::files::RawEngine;
+
+    #[test]
+    fn raw_engine_preference_migrates_and_roundtrips() {
+        let old: AppSettings = serde_json::from_str(r#"{"appleRaw":false}"#).unwrap();
+        assert_eq!(old.preferred_raw_engine(), RawEngine::LightCraft);
+        let old_default: AppSettings = serde_json::from_str("{}").unwrap();
+        let platform_default = if cfg!(target_os = "macos") { RawEngine::Apple } else { RawEngine::LightCraft };
+        assert_eq!(old_default.preferred_raw_engine(), platform_default);
+        let settings = AppSettings { raw_engine: Some(RawEngine::LibRaw), libraw_path: "/opt/LibRaw 0.22/dcraw_emu".into(), ..old_default };
+        let json = serde_json::to_string(&settings).unwrap();
+        let restored: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.preferred_raw_engine(), RawEngine::LibRaw);
+        assert_eq!(restored.raw_engine_path(RawEngine::LibRaw), Some(std::path::Path::new("/opt/LibRaw 0.22/dcraw_emu")));
+    }
 }
 
 #[cfg(test)]

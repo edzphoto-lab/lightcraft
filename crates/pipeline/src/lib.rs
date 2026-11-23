@@ -78,9 +78,9 @@ pub struct SourceInfo {
     /// Raw sources use absolute Kelvin white balance; rendered sources use a relative scale around
     /// their as-shot white.
     pub raw: bool,
-    /// Core Image has already applied the RAW engine's base tone. Keep RAW editing controls
+    /// An external RAW developer has already applied its base tone. Keep RAW editing controls
     /// while avoiding a second default tone curve.
-    pub apple_raw: bool,
+    pub rendered_raw: bool,
     pub as_shot_temp: f64,
     pub as_shot_tint: f64,
     /// No measured camera illuminant: WB adjustments are relative to the camera's rendered look.
@@ -109,7 +109,7 @@ impl Default for SourceInfo {
     fn default() -> Self {
         Self {
             raw: false,
-            apple_raw: false,
+            rendered_raw: false,
             as_shot_temp: 6500.0,
             as_shot_tint: 0.0,
             lens: None,

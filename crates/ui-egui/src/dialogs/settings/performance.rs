@@ -8,12 +8,30 @@ use super::{CACHE_SIZES, LABEL_W, LightcraftApp, PREVIEW_LIMITS, RichText, Token
 pub(super) fn performance_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
     use lightcraft_engine::gpu;
     heading(ui, t, crate::i18n::tr("Rendering"));
-    #[cfg(target_os = "macos")]
+    #[cfg(not(target_arch = "wasm32"))]
     {
-        row(ui, t, crate::i18n::tr("RAW engine"), |ui| {
-            choices(ui, "settingsRawEngine", &[(true, "Apple Core Image RAW"), (false, "LightCraft")], &mut app.ui.settings.apple_raw);
-        });
-        hint(ui, t, crate::i18n::tr("Applies at next launch. LightCraft opens RAW files Apple cannot develop."));
+        use lightcraft_engine::files::RawEngine;
+        let settings = &mut app.ui.settings;
+        let mut engine = settings.preferred_raw_engine();
+        let options = [
+            #[cfg(target_os = "macos")]
+            (RawEngine::Apple, "Apple Core Image RAW"),
+            (RawEngine::LightCraft, "LightCraft"),
+            (RawEngine::RawTherapee, "RawTherapee"),
+            (RawEngine::LibRaw, "LibRaw 0.22"),
+        ];
+        if row(ui, t, crate::i18n::tr("RAW engine"), |ui| choices(ui, "settingsRawEngine", &options, &mut engine)) {
+            settings.raw_engine = Some(engine);
+        }
+        if let (Some(path), Some(binary)) = (settings.raw_engine_path_mut(engine), engine.executable_name()) {
+            row(ui, t, crate::i18n::tr("RAW converter"), |ui| {
+                ui.add(egui::TextEdit::singleline(path).hint_text(binary));
+            });
+            hint(ui, t, crate::i18n::tr("Install the converter separately. Leave the path empty for automatic detection."));
+        }
+        let active = lightcraft_engine::files::active_raw_engine().label();
+        hint(ui, t, &crate::i18n::tr_format!("Active RAW engine: {engine}", engine = active));
+        hint(ui, t, crate::i18n::tr("Applies at next launch. LightCraft takes over if the selected RAW engine cannot open a file."));
     }
     #[cfg(target_os = "windows")]
     check(ui, "settings.composeWindow", &mut app.ui.settings.compose_window, "Prevent G-SYNC/FreeSync flicker (applies at next launch)");

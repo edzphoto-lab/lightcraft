@@ -51,6 +51,7 @@ lightcraft-apple-raw = { workspace = true }
 lightcraft-fetch = { workspace = true }
 # capture-time parsing for face recognition (native only)
 chrono = { workspace = true }
+tempfile = "3.27"
 
 [features]
 # AI masks with SAM 3 (Object / Describe). Off for the web and CLI builds.

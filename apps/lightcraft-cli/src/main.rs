@@ -140,8 +140,6 @@ fn library_error(dir: &str, e: lightcraft_engine::EngineError) -> String {
 }
 
 fn main() -> ExitCode {
-    #[cfg(target_os = "macos")]
-    lightcraft_engine::files::configure_apple_raw(std::env::var("LIGHTCRAFT_RAW_ENGINE").as_deref() == Ok("apple"));
     // `--features dhat-heap`: count allocations; the profile is written when `_heap` drops
     // (LIGHTCRAFT_DHAT_FILE, default dhat-heap.json).
     #[cfg(feature = "dhat-heap")]
@@ -157,6 +155,15 @@ fn main() -> ExitCode {
     // Warnings (a GPU render redone on the CPU, an unknown backend name) on stderr; LIGHTCRAFT_LOG
     // or RUST_LOG picks another level (#168).
     lightcraft_engine::logging::install("lightcraft-cli");
+    use lightcraft_engine::files::RawEngine;
+    let engine = match std::env::var("LIGHTCRAFT_RAW_ENGINE").as_deref() {
+        Ok("apple") => RawEngine::Apple,
+        Ok("rawtherapee") => RawEngine::RawTherapee,
+        Ok("libraw") => RawEngine::LibRaw,
+        _ => RawEngine::LightCraft,
+    };
+    let executable = std::env::var_os("LIGHTCRAFT_RAW_ENGINE_PATH").map(std::path::PathBuf::from);
+    lightcraft_engine::files::configure_raw_engine(engine, executable.as_deref());
     let mut args: Vec<String> = Vec::new();
     for (index, arg) in std::env::args_os().skip(1).enumerate() {
         match arg.into_string() {
