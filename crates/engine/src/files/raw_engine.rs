@@ -120,7 +120,7 @@ mod native {
         let backend = BACKEND.get().ok_or("RAW engine has not been configured")?;
         #[cfg(target_os = "macos")]
         if backend.engine == RawEngine::Apple {
-            return lightcraft_apple_raw::decode(path, max_edge);
+            return lightcraft_apple_raw::decode(path, max_edge).map_err(str::to_owned);
         }
         let executable = backend.executable.as_ref().ok_or("RAW converter executable is unavailable")?;
         let source = std::path::absolute(path).map_err(|error| error.to_string())?;
