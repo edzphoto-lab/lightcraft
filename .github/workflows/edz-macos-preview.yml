@@ -62,9 +62,11 @@ jobs:
           fixture="$RUNNER_TEMP/d600.nef"
           test_dir="$(mktemp -d)"
           cd "$test_dir"
-          curl -fSL --retry 2 --max-time 120 'https://www.libraw.org/data/LibRaw-0.22.3-macOS.zip' -o libraw.zip
-          printf '%s  %s\n' 1edd33c66be1cfdc74e0a471c4143d25f0172234a46a44dce5511a396a35af55 libraw.zip | shasum -a 256 -c -
-          unzip -q libraw.zip '*/bin/dcraw_emu'
+          # Build the CLI on macOS 15: the published 0.22.3 executable targets macOS 26.
+          curl -fSL --retry 2 --max-time 120 'https://www.libraw.org/data/LibRaw-0.22.3.tar.gz' -o libraw.tar.gz
+          printf '%s  %s\n' 789f3c33466210a1a0907f747a97c715d21bbf4af712f257fcbbd90111b227e4 libraw.tar.gz | shasum -a 256 -c -
+          tar -xzf libraw.tar.gz
+          (cd LibRaw-0.22.3 && ./configure --disable-openmp --disable-shared --disable-lcms && make -j3 bin/dcraw_emu)
           LIGHTCRAFT_RAW_ENGINE=libraw LIGHTCRAFT_RAW_ENGINE_PATH="$test_dir/LibRaw-0.22.3/bin/dcraw_emu" LIGHTCRAFT_LOG=debug \
             "$cli" render "$fixture" -o "$test_dir/libraw.tif" --size 768 --opt bitDepth=16 2>&1 | tee libraw.log
           grep -F 'Developed RAW with LibRaw' libraw.log
