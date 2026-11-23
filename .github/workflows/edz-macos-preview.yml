@@ -55,6 +55,14 @@ jobs:
           LIGHTCRAFT_RAW_ENGINE=lightcraft "$cli" render "$fixture" -o "$test_dir/lightcraft.tif" --size 768 --opt bitDepth=16
           test -s "$test_dir/apple.tif"
           test -s "$test_dir/lightcraft.tif"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: LightCraft-EdZ-Lab-macOS-Intel
+          path: |
+            dist/release/lightcraft-edz-lab-*-macos-x86_64.dmg
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
       - name: Verify external RAW engines on macOS
         run: |
           set -euo pipefail
@@ -78,18 +86,10 @@ jobs:
           rt="$test_dir/RawTherapee_macOS_15.4_Universal_5.12_folder"
           mount="$test_dir/rawtherapee-volume"
           mkdir "$mount"
-          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "$rt/RawTherapee_macOS_15.4_Universal_5.12.dmg"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "$rt/RawTherapee_macOS_15.4_Universal_5.12.dmg" <<< Y
           trap 'hdiutil detach "$mount"' EXIT
           ditto "$mount/RawTherapee.app" /Applications/RawTherapee.app
           LIGHTCRAFT_RAW_ENGINE=rawtherapee LIGHTCRAFT_RAW_ENGINE_PATH="$rt/rawtherapee-cli" LIGHTCRAFT_LOG=debug \
             "$cli" render "$fixture" -o "$test_dir/rawtherapee.tif" --size 768 --opt bitDepth=16 2>&1 | tee rawtherapee.log
           grep -F 'Developed RAW with RawTherapee' rawtherapee.log
           test -s rawtherapee.tif
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: LightCraft-EdZ-Lab-macOS-Intel
-          path: |
-            dist/release/lightcraft-edz-lab-*-macos-x86_64.dmg
-          if-no-files-found: error
-          retention-days: 14
-          compression-level: 0
