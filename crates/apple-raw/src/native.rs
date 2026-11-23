@@ -62,43 +62,43 @@ pub fn available() -> bool {
     AnyClass::get(c"CIRAWFilter").is_some()
 }
 
-pub fn decode(bytes: &[u8], max_edge: usize) -> Option<(Rgb32f, usize)> {
+pub fn decode(bytes: &[u8], max_edge: usize) -> Result<(Rgb32f, usize), &'static str> {
     autoreleasepool(|_| {
-        let raw_class = AnyClass::get(c"CIRAWFilter")?;
-        let context_class = AnyClass::get(c"CIContext")?;
+        let raw_class = AnyClass::get(c"CIRAWFilter").ok_or("CIRAWFilter is unavailable")?;
+        let context_class = AnyClass::get(c"CIContext").ok_or("CIContext is unavailable")?;
         let data = NSData::with_bytes(bytes);
         // SAFETY: the documented Core Image selectors and their argument/return encodings.
         // The RAW filter keeps the input data alive and applies the file's EXIF orientation.
         unsafe {
             let raw: Option<Retained<AnyObject>> = msg_send![raw_class, filterWithImageData: &*data, identifierHint: null::<AnyObject>()];
-            let raw = raw?;
+            let raw = raw.ok_or("Apple did not recognize the RAW data")?;
             let native: CGSize = msg_send![&raw, nativeSize];
             let edge = native.width.max(native.height);
             if !edge.is_finite() || edge <= 0.0 || max_edge == 0 {
-                return None;
+                return Err("Apple reported invalid RAW dimensions");
             }
             if edge > max_edge as f64 {
                 let scale = (max_edge as f64 / edge) as f32;
                 let _: () = msg_send![&raw, setScaleFactor: scale];
             }
             let image: Option<Retained<AnyObject>> = msg_send![&raw, outputImage];
-            let image = image?;
+            let image = image.ok_or("Apple did not produce a RAW image")?;
             let bounds: CGRect = msg_send![&image, extent];
             let pixels = bounds.size.width * bounds.size.height;
             if !pixels.is_finite() || !(1.0..=128_000_000.0).contains(&pixels) {
-                return None;
+                return Err("Apple's RAW output exceeds the pixel limit or has invalid dimensions");
             }
             let context: Option<Retained<AnyObject>> = msg_send![context_class, contextWithOptions: null::<AnyObject>()];
-            let context = context?;
-            let space = OwnedCf::new(CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearITUR_2020))?;
+            let context = context.ok_or("could not create a Core Image context")?;
+            let space = OwnedCf::new(CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearITUR_2020)).ok_or("could not create linear Rec.2020")?;
             let cg: *mut c_void = msg_send![&context, createCGImage: &*image, fromRect: bounds, format: kCIFormatRGBAf, colorSpace: space.as_ptr()];
-            let cg = OwnedCf::new(cg)?;
-            let mut rgb = pixels_from_image(&cg)?;
+            let cg = OwnedCf::new(cg).ok_or("Core Image could not render a float bitmap")?;
+            let mut rgb = pixels_from_image(&cg).ok_or("Core Image returned an unreadable float bitmap")?;
             let native_long = edge.round() as usize;
             if rgb.width.max(rgb.height) > max_edge {
                 rgb = lightcraft_raster::resample::fit(&rgb, max_edge, max_edge, lightcraft_raster::resample::Filter::Box);
             }
-            Some((rgb, native_long))
+            Ok((rgb, native_long))
         }
     })
 }

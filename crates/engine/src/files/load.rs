@@ -63,20 +63,23 @@ fn load_bytes_now(
     if lightcraft_raw::probe(&bytes).is_some() {
         #[cfg(target_os = "macos")]
         if denoise.is_none() && super::apple_raw_enabled() {
-            if let Some((img, native_long)) = lightcraft_apple_raw::decode(&bytes, max_edge) {
-                let mut info = SourceInfo { raw: true, apple_raw: true, relative_wb: true, native_long: Some(native_long), ..SourceInfo::default() };
-                if let Ok(raw) = lightcraft_raw::probe_info(&bytes) {
-                    // Keep existing white-balance recipes on their original scale. Apple delivers
-                    // as-shot pixels, so further WB changes adapt those pixels in the pipeline.
-                    let scale = WbScaleOf::new(raw.format, &raw.color, raw.wb_multipliers, &raw.metadata);
-                    (info.as_shot_temp, info.as_shot_tint) = scale.as_shot(lightcraft_raw::color::as_shot_white_xy_of(&raw));
-                    info.relative_wb = scale.relative;
-                    info.legacy_relative_wb = scale.legacy_relative;
+            match lightcraft_apple_raw::decode(&bytes, max_edge) {
+                Ok((img, native_long)) => {
+                    let mut info =
+                        SourceInfo { raw: true, apple_raw: true, relative_wb: true, native_long: Some(native_long), ..SourceInfo::default() };
+                    if let Ok(raw) = lightcraft_raw::probe_info(&bytes) {
+                        // Keep existing white-balance recipes on their original scale. Apple delivers
+                        // as-shot pixels, so further WB changes adapt those pixels in the pipeline.
+                        let scale = WbScaleOf::new(raw.format, &raw.color, raw.wb_multipliers, &raw.metadata);
+                        (info.as_shot_temp, info.as_shot_tint) = scale.as_shot(lightcraft_raw::color::as_shot_white_xy_of(&raw));
+                        info.relative_wb = scale.relative;
+                        info.legacy_relative_wb = scale.legacy_relative;
+                    }
+                    log::debug!("Developed RAW with Apple Core Image");
+                    return Ok((img, None, info, false));
                 }
-                log::debug!("Developed RAW with Apple Core Image");
-                return Ok((img, None, info, false));
+                Err(why) => log::debug!("Apple Core Image RAW could not develop the file ({why}); using LightCraft"),
             }
-            log::debug!("Apple Core Image RAW could not develop the file; using LightCraft");
         }
         // a thumbnail (`allow_reduced`, never an export) of a DNG that keeps smaller copies of its raw image
         // (Lightroom's merges) develops the smallest that covers it; a denoised photo's twin needs the full mosaic
